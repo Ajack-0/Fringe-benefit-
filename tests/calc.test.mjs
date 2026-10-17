@@ -168,21 +168,29 @@ test('Amministratore, uso personale: valore normale = costo annuo, senza scorpor
 // ---------- deducibilità ----------
 const fringe = (giorni = 365, imponibile = 5000) => ({ imponibile, giorni, giorniAnno: 365 });
 
-test('Dipendente, maggior parte dell\'anno: costi 70%, Iva 40% (100% con corrispettivo)', () => {
+test('Dipendente, maggior parte dell\'anno: 70% di costi + Iva non detraibile, Iva 40% (100% con corrispettivo)', () => {
   const d = FB.deducibilita({ costiAnnui: '10.000,00', ivaCosti: 2200 }, fringe());
-  assert.equal(d.imposte.perc, 70); assert.equal(d.imposte.importo, 7000);
   assert.equal(d.iva.perc, 40); assert.equal(d.iva.detraibile, 880); assert.equal(d.iva.indetraibile, 1320);
-  assert.equal(FB.deducibilita({ costiAnnui: 1000, ivaCosti: 220, addebito: true }, fringe()).iva.detraibile, 220);
+  assert.equal(d.imposte.perc, 70); assert.equal(d.imposte.importo, FB.r2((10000 + 1320) * 0.7)); // l'Iva indetraibile è un costo (ebook p. 41)
+  const c = FB.deducibilita({ costiAnnui: 1000, ivaCosti: 220, addebito: true }, fringe());
+  assert.equal(c.iva.detraibile, 220); assert.equal(c.imposte.importo, 700);
 });
 
-test('Dipendente, assegnazione per meno di metà anno: 20% con limiti, Iva 40%', () => {
-  const d = FB.deducibilita({ costiAnnui: 10000, titolo: 'noleggio' }, fringe(100));
-  assert.equal(d.imposte.perc, 20); assert.equal(d.imposte.importo, 2000);
-  assert.match(d.limiti[0], /723,04/);
+test('Ebook p. 40: auto acquistata a 56.600 € (Iva indetraibile compresa), ammortamento 14.150 → quota deducibile 20% = 903,80', () => {
+  const d = FB.deducibilita({ costiAnnui: 14150, quotaBene: 14150, titolo: 'acquisto', costoVeicolo: 56600 }, fringe(100));
+  assert.equal(d.imposte.perc, 20); assert.equal(d.imposte.importo, 903.8);
+  assert.equal(d.limiti.length, 0);
 });
 
-test('Amministratore uso promiscuo: esempio ebook p. 43 → 10.000 + 20% × 2.019 = 10.403,80', () => {
-  const d = FB.deducibilita({ beneficiario: 'amministratore', usoAmm: 'promiscuo', costiAnnui: 12019 }, fringe(365, 10000));
+test('Noleggio assegnato per meno di metà anno: canone limitato a 3.615,20, altri costi pieni', () => {
+  const d = FB.deducibilita({ costiAnnui: 10000, quotaBene: 8000, titolo: 'noleggio' }, fringe(100));
+  assert.equal(d.imposte.importo, FB.r2((10000 - 8000 + 3615.2) * 0.2)); // 1.123,04
+  const senza = FB.deducibilita({ costiAnnui: 10000, titolo: 'noleggio' }, fringe(100));
+  assert.equal(senza.imposte.importo, 2000); assert.match(senza.limiti[0], /non applicato/);
+});
+
+test('Amministratore uso promiscuo: esempio ebook p. 43 → spese 20.000 (ammortamento 12.500 su auto da 50.000) → 10.000 + 20% × 2.019 = 10.403,80', () => {
+  const d = FB.deducibilita({ beneficiario: 'amministratore', usoAmm: 'promiscuo', costiAnnui: 20000, quotaBene: 12500, titolo: 'acquisto', costoVeicolo: 50000 }, fringe(365, 10000));
   assert.equal(d.imposte.importo, 10403.8);
 });
 
@@ -198,4 +206,24 @@ test('Numeri: il punto con tre cifre dopo è separatore delle migliaia, non deci
 
 test('Numeri: separatore decimale = ultimo tra punto e virgola', () => {
   assert.equal(FB.num('1,000.50'), 1000.5); assert.equal(FB.num('1.000,50'), 1000.5); assert.equal(FB.num('12,5'), 12.5);
+});
+
+test('Costo km con punto e tre decimali: "1.152" è 1,152 €/km, non 1.152', () => {
+  assert.equal(FB.num('1.152', false), 1.152); assert.equal(FB.num('1.152'), 1152);
+  const r = FB.calcolaRegime('nuovo', { ...base, ck: '1.152', dataImmatricolazione: '2026-01-01' }, R);
+  assert.equal(r.valoreAnnuo, FB.r2(1.152 * 15000 * 0.5));
+  const n = FB.calcolaNormale({ anno: 2026, canone: 6000, kmLavoro: 1000, tariffaKm: '1.152' }, R);
+  assert.equal(n.valoreAnnuo, 6000 - 1152);
+});
+
+test('Amministratore con mezzo fuori forfait: uso aziendale = 0, uso personale = valore normale; dipendente = errore', () => {
+  const x = { ...base, categoria: 'altro', beneficiario: 'amministratore', dataContratto: '2026-01-01', canone: 3000 };
+  assert.equal(FB.calcola({ ...x, usoAmm: 'aziendale' }, R).imponibile, 0);
+  assert.equal(FB.calcola({ ...x, usoAmm: 'personale' }, R).imponibile, 3000);
+  assert.ok(FB.calcola({ ...x, usoAmm: 'promiscuo' }, R).errore);
+  assert.ok(FB.calcola({ ...x, beneficiario: 'dipendente' }, R).errore);
+});
+
+test('Auto ordinata entro il 2024 e concessa a settembre 2025: regime CO2 (testo vigente: tutto il 2025)', () => {
+  assert.equal(FB.determinaRegime({ dataContratto: '2025-09-01', dataOrdine: '2024-11-20' }).chiave, 'co2');
 });

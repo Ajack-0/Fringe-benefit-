@@ -37,17 +37,26 @@
     dataContratto: '', dataOrdine: '', aciKey: '', aciLabel: '', ck: '', ckManuale: false,
     inizio: '', fine: '', trattenuta: '', accessori: false, dipendente: '', azienda: '',
     beneficiario: 'dipendente', usoAmm: 'promiscuo', canone: '', kmLavoro: '', tariffaKm: '',
-    titolo: '', addebito: false, costiAnnui: '', ivaCosti: '',
+    titolo: '', addebito: false, costiAnnui: '', ivaCosti: '', quotaBene: '', costoVeicolo: '',
   });
   const S = {
     tab: 'calcolo', anno: null,
-    regole: LS.get('fb.regole', null) || clone(REGOLE_DEFAULT),
+    regole: unisciRegole(LS.get('fb.regole', null)),
     flotta: LS.get('fb.flotta', []),
     step: 1, d: { ...nuoviDati(), ...LS.get('fb.bozza', {}) }, editId: null,
     q: '', qChiave: null, qSolo: true, qProd: true,
     aci: { anno: null, q: '', alim: '', prod: false },
     regSel: null, imp: null,
   };
+  /**
+   * Regole salvate dall'utente + versioni predefinite che l'utente non ha (es. una nuova versione
+   * "dal 2027" rilasciata nel codice): le sue modifiche restano, le novità arrivano comunque.
+   */
+  function unisciRegole(salvate) {
+    if (!Array.isArray(salvate) || !salvate.length) return clone(REGOLE_DEFAULT);
+    const nuove = REGOLE_DEFAULT.filter((d) => !salvate.some((x) => x.dal === d.dal)).map(clone);
+    return [...salvate, ...nuove];
+  }
   const salvaBozza = () => LS.set('fb.bozza', S.d);
   const salvaFlotta = () => { LS.set('fb.flotta', S.flotta); $('#n-flotta').textContent = S.flotta.length; };
 
@@ -67,7 +76,7 @@
 
   // ---------- calcolo di un veicolo ----------
   function calcolaVeicolo(d, anno) {
-    let ck = FB.num(d.ck) || 0, riga = null, mancante = false;
+    let ck = FB.num(d.ck, false) || 0, riga = null, mancante = false;
     if (d.aciKey && !d.ckManuale) {
       riga = ACI.perChiave(anno, d.aciKey);
       if (riga) ck = riga.ck; else mancante = true;
@@ -76,7 +85,7 @@
       anno, dataImmatricolazione: d.dataImm, dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, alim: d.alim,
       categoria: d.categoria, co2: d.co2, ck, inizio: d.inizio, fine: d.fine, trattenuta: d.trattenuta, accessori: d.accessori,
       beneficiario: d.beneficiario, usoAmm: isAmm(d) ? d.usoAmm : '', canone: d.canone, kmLavoro: d.kmLavoro, tariffaKm: d.tariffaKm,
-      titolo: d.titolo, addebito: d.addebito, costiAnnui: d.costiAnnui, ivaCosti: d.ivaCosti,
+      titolo: d.titolo, addebito: d.addebito, costiAnnui: d.costiAnnui, ivaCosti: d.ivaCosti, quotaBene: d.quotaBene, costoVeicolo: d.costoVeicolo,
     };
     return { inp, riga, mancante, ck, res: FB.calcola(inp, S.regole) };
   }
@@ -115,26 +124,36 @@
     if (step === 1) {
       if (!d.dataImm) e.dataImm = 'Indica la data di prima immatricolazione (campo B).';
       if (!d.alim) e.alim = 'Seleziona l\'alimentazione (campo P.3).';
-      if (d.co2 !== '' && !(FB.num(d.co2) >= 0)) e.co2 = 'Valore non valido.';
+      if (d.co2 !== '' && !(FB.num(d.co2, false) >= 0)) e.co2 = 'Valore non valido.';
     }
     if (step === 2) {
       if (!d.dataContratto) e.dataContratto = 'Indica la data di stipula dell\'atto di assegnazione.';
-      else if (d.dataImm && d.dataContratto < d.dataImm && FB.anno(d.dataContratto) < FB.anno(d.dataImm)) e.dataContratto = 'La data di assegnazione è precedente all\'immatricolazione: controlla le date.';
       if (!e.dataContratto) {
         const reg = regimeDi(d);
         if (reg.chiave === 'co2' && d.alim !== 'elettrico' && d.co2 === '' && !personaleAmm(d) && !aziendaleAmm(d)) e.co2 = 'Per il regime CO₂ serve il valore del campo V.7.';
       }
     }
-    if (step === 3 && !(FB.num(d.ck) > 0) && !personaleAmm(d) && !aziendaleAmm(d)) e.ck = 'Seleziona il modello dalla tabella ACI oppure inserisci il costo chilometrico.';
+    if (step === 3 && !(FB.num(d.ck, false) > 0) && !personaleAmm(d) && !aziendaleAmm(d)) e.ck = 'Seleziona il modello dalla tabella ACI oppure inserisci il costo chilometrico.';
     if (step === 4) {
       if (d.inizio && d.fine && d.inizio > d.fine) e.fine = 'La data di fine è precedente all\'inizio.';
       if (d.trattenuta !== '' && !(FB.num(d.trattenuta) >= 0)) e.trattenuta = 'Importo non valido.';
       if (personaleAmm(d) && !(FB.num(d.canone) > 0)) e.canone = 'Per l\'uso personale indica il costo annuo del veicolo (valore normale).';
-      for (const f of ['canone', 'kmLavoro', 'tariffaKm', 'costiAnnui', 'ivaCosti']) if (d[f] !== '' && !e[f] && !(FB.num(d[f]) >= 0)) e[f] = 'Importo non valido.';
+      for (const f of ['canone', 'kmLavoro', 'tariffaKm', 'costiAnnui', 'ivaCosti', 'quotaBene', 'costoVeicolo']) if (d[f] !== '' && !e[f] && !(FB.num(d[f], f !== 'tariffaKm') >= 0)) e[f] = 'Importo non valido.';
+      if (!e.quotaBene && FB.num(d.quotaBene) > FB.num(d.costiAnnui)) e.quotaBene = 'La quota non può superare i costi annui totali.';
     }
     return e;
   }
   const puoAndare = (i) => { for (let j = 1; j < i; j++) if (Object.keys(valida(j)).length) return false; return true; };
+
+  const regoleCorrenti = () => FB.regoleAnno(S.regole, S.anno);
+  function testoAnzianita() {
+    const R = regoleCorrenti();
+    return R && R.anzianita.attiva ? `Stabilisce l'anzianità: nel ${S.anno} +${R.anzianita.perc}% dopo il 31.12 del ${R.anzianita.anni}° anno successivo all'immatricolazione.` : 'Stabilisce l\'anzianità del veicolo.';
+  }
+  function testoAccessori() {
+    const R = regoleCorrenti();
+    return R && R.accessori.attiva ? `Nel ${S.anno} il valore è maggiorato del ${R.accessori.perc}% (solo nuovo regime).` : `Nel ${S.anno} non è prevista maggiorazione.`;
+  }
 
   // ---------- CALCOLO GUIDATO ----------
   const PASSI = [['Veicolo', 'dal libretto'], ['Assegnazione', 'utilizzatore e date'], ['Modello ACI', 'costo al km'], ['Periodo', 'trattenute e costi'], ['Risultato', 'e confronto']];
@@ -161,7 +180,7 @@
         <li><b>D.1 / D.3 / P.2</b> – marca, modello e potenza: ci servono per trovare l'auto nella tabella ACI</li></ul></div>
       <div class="row2">
         ${campo({ f: 'targa', label: 'Targa', code: 'A', attrs: 'autocomplete="off" placeholder="AB123CD"', hint: 'Facoltativa: serve solo a riconoscere l\'auto nel parco auto.' })}
-        ${campo({ f: 'dataImm', label: 'Data di prima immatricolazione', code: 'B', type: 'date', err: e.dataImm, hint: 'Stabilisce l\'anzianità: dal 2026 +50% oltre il 5° anno.' })}
+        ${campo({ f: 'dataImm', label: 'Data di prima immatricolazione', code: 'B', type: 'date', err: e.dataImm, hint: testoAnzianita() })}
       </div>
       <div class="row2">
         ${campo({ f: 'marca', label: 'Marca', code: 'D.1', attrs: 'autocomplete="off" placeholder="es. Volkswagen"' })}
@@ -276,17 +295,21 @@
       </div>
       ${campo({ f: 'trattenuta', label: 'Importo trattenuto o pagato dal dipendente nell\'anno (€, Iva inclusa)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="0,00"', err: e.trattenuta, hint: 'Se è previsto un canone o un prezzo per l\'uso privato, il reddito è la differenza tra valore forfetario e quanto versato (al lordo dell\'Iva). Se cambi anno d\'imposta nel parco auto l\'importo viene riproposto uguale: aggiornalo.' })}
       <div id="acc-info"></div>
-      ${checkbox({ f: 'accessori', label: 'L\'auto ha accessori o allestimenti non valorizzati nelle tabelle ACI e non acquistati direttamente dal dipendente', hint: 'Dal 2026 il valore è maggiorato del 5% (solo nuovo regime). Es. optional montati dal concessionario non compresi nella versione ACI.', wrapId: 'w-acc' })}
+      ${checkbox({ f: 'accessori', label: 'L\'auto ha accessori o allestimenti non valorizzati nelle tabelle ACI e non acquistati direttamente dal dipendente', hint: `${testoAccessori()} Es. optional montati dal concessionario non compresi nella versione ACI.`, wrapId: 'w-acc' })}
       <div class="row2">
         ${campo({ f: 'dipendente', label: 'Utilizzatore (facoltativo)', attrs: 'autocomplete="off"' })}
         ${campo({ f: 'azienda', label: 'Azienda (facoltativo)', attrs: 'autocomplete="off"' })}
       </div>
       <h3 style="margin-top:18px">Per la deducibilità (facoltativo)</h3>
       <p class="muted">Servono per mostrarti, per questa targa, la deducibilità dei costi e dell'Iva e gli importi in euro.</p>
-      ${campo({ f: 'titolo', label: 'Come l\'azienda ha l\'auto', opts: [['', '— non so / non indicato —'], ['acquisto', 'Acquisto'], ['leasing', 'Leasing'], ['noleggio', 'Noleggio']], hint: 'Serve a indicarti il limite di costo, che conta quando la deducibilità è del 20%.' })}
+      ${campo({ f: 'titolo', label: 'Come l\'azienda ha l\'auto', opts: [['', '— non so / non indicato —'], ['acquisto', 'Acquisto'], ['leasing', 'Leasing'], ['noleggio', 'Noleggio']], hint: 'Serve ad applicare il limite di costo quando la deducibilità è del 20% (anche per gli amministratori).' })}
       <div class="row2">
-        ${campo({ f: 'costiAnnui', label: 'Costi annui del veicolo per l\'azienda (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 8.500,00"', err: e.costiAnnui, hint: 'Ammortamento o canone, assicurazione, bollo, carburante, manutenzione. Imponibile (Iva esclusa).' })}
-        ${campo({ f: 'ivaCosti', label: 'Iva sui costi annui (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 1.870,00"', err: e.ivaCosti, hint: 'Iva pagata sui costi indicati qui a sinistra.' })}
+        ${campo({ f: 'costiAnnui', label: 'Costi annui del veicolo per l\'azienda (€, Iva esclusa)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 8.500,00"', err: e.costiAnnui, hint: 'Ammortamento o canone, assicurazione, bollo, carburante, manutenzione. Per l\'acquisto, l\'ammortamento si calcola sul costo comprensivo dell\'Iva non detraibile.' })}
+        ${campo({ f: 'ivaCosti', label: 'Iva sui costi annui (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 1.870,00"', err: e.ivaCosti, hint: 'Iva sui costi dell\'anno (canoni, carburante, manutenzione). La parte non detraibile diventa costo deducibile.' })}
+      </div>
+      <div class="row2">
+        ${campo({ f: 'quotaBene', label: 'di cui ammortamento o canone (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 4.500,00"', err: e.quotaBene, hint: 'La parte dei costi annui a cui si applica il limite di costo.' })}
+        ${campo({ f: 'costoVeicolo', label: 'Costo del veicolo (€, con Iva non detraibile)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 56.600,00"', err: e.costoVeicolo, wrapId: 'w-costoveicolo', hint: 'Solo acquisto o leasing: se supera 18.075,99 € la quota si riduce in proporzione.' })}
       </div>
       ${checkbox({ f: 'addebito', label: 'Al dipendente è addebitato un corrispettivo con fattura per l\'uso privato', hint: 'In questo caso l\'Iva sull\'auto è detraibile al 100%.', wrapId: 'w-addebito' })}
       ${navBtns('Calcola →')}</div>`;
@@ -307,6 +330,7 @@
     $('#w-normale').hidden = !serveNormale(d);
     $('#w-kmlav').hidden = personaleAmm(d);
     $('#w-addebito').hidden = isAmm(d);
+    $('#w-costoveicolo').hidden = d.titolo === 'noleggio';
     $('#normale-txt').innerHTML = personaleAmm(d)
       ? '<b>Uso esclusivamente personale:</b> il compenso in natura è il valore normale dell\'auto (art. 9 Tuir). Indica il costo annuo sostenuto dalla società per il veicolo.'
       : '<b>Veicolo usato assegnato quando la norma richiedeva la "nuova immatricolazione".</b> Per l\'Agenzia (Telefisco 2021) il benefit non è forfettario: si prende il canone di leasing/noleggio pagato dal datore di lavoro e si <b>scorpora l\'indennità chilometrica ACI</b> per i km percorsi nell\'interesse del datore di lavoro. Se non indichi i dati, l\'app mostra solo il forfait ACI come stima.';
@@ -317,7 +341,7 @@
     const c = calcolaVeicolo(S.d, S.anno), r = c.res, box = $('#dyn4-prev');
     if (!box) return;
     if (r.errore) { box.innerHTML = `<div class="note warn"><p><b>Anteprima non disponibile:</b> ${esc(r.errore)}</p></div>`; return; }
-    const extra = r.maggiorazioni.length ? ` · maggiorazioni: ${r.maggiorazioni.map((m) => ({ anzianita: '+50% anzianità', accessori: '+5% accessori' }[m])).join(', ')}` : '';
+    const extra = r.maggiorazioni.length ? ` · maggiorazioni: ${r.maggiorazioni.map((m) => (m === 'anzianita' ? `+${r.regola.anzianita.perc}% anzianità` : `+${r.regola.accessori.perc}% accessori`)).join(', ')}` : '';
     box.innerHTML = `<div class="note ok"><p><b>Anteprima del calcolo</b> (${esc(REGIMI[r.regime.chiave].breve)}${r.perc != null ? ' ' + r.perc + '%' : ''}${extra})</p>
       <p>Valore ${r.regime.chiave === 'normale' ? 'del benefit' : 'annuo pieno'}: <b>${eur(r.valoreAnnuo)}</b> · ragguagliato a ${r.giorni}/${r.giorniAnno} giorni: <b>${eur(r.proRata)}</b> · trattenuta: <b>${eur(r.trattenuta)}</b> → <b>imponibile ${eur(r.imponibile)}</b></p></div>`;
   }
@@ -698,7 +722,14 @@
       else if (ext === 'json') {
         const j = JSON.parse(await file.text());
         if (!Array.isArray(j.righe)) throw new Error('JSON non nel formato atteso (campo "righe").');
-        res = { righe: j.righe.map((r) => ({ id: r[0], marca: r[1], modello: r[2], alim: r[3], sotto: r[4], prod: r[5] === 1, ck: r[6] })), anomalie: [] };
+        const righe = [], anomalie = [];
+        j.righe.forEach((r, i) => {
+          const ck = FB.num(Array.isArray(r) ? r[6] : NaN, false);
+          const alim = Array.isArray(r) ? String(r[3] || '').toLowerCase() : '';
+          if (!Array.isArray(r) || !(ck > 0) || !ACI.ALIM_ACI.includes(alim)) { anomalie.push(`riga ${i + 1}: costo km o alimentazione non validi`); return; }
+          righe.push({ id: r[0] == null || r[0] === '' ? null : Number(r[0]), marca: String(r[1] || ''), modello: String(r[2] || ''), alim, sotto: String(r[4] || ''), prod: r[5] === 1 || r[5] === true, ck });
+        });
+        res = { righe, anomalie };
         if (j.anno) $('#imp-anno').value = j.anno;
         if (j.fonte) $('#imp-fonte').value = j.fonte;
       } else throw new Error('Formato non supportato: usa PDF, CSV o JSON.');
