@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: fringe-benefit-auto
+    runtime: static
+    staticPublishPath: .
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
