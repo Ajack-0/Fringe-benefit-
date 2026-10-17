@@ -36,6 +36,8 @@
     targa: '', marca: '', modello: '', dataImm: '', categoria: 'autovettura', alim: '', co2: '', cc: '', kw: '', posti: '',
     dataContratto: '', dataOrdine: '', aciKey: '', aciLabel: '', ck: '', ckManuale: false,
     inizio: '', fine: '', trattenuta: '', accessori: false, dipendente: '', azienda: '',
+    beneficiario: 'dipendente', usoAmm: 'promiscuo', canone: '', kmLavoro: '', tariffaKm: '',
+    titolo: '', addebito: false, costiAnnui: '', ivaCosti: '',
   });
   const S = {
     tab: 'calcolo', anno: null,
@@ -49,6 +51,20 @@
   const salvaBozza = () => LS.set('fb.bozza', S.d);
   const salvaFlotta = () => { LS.set('fb.flotta', S.flotta); $('#n-flotta').textContent = S.flotta.length; };
 
+  // ---------- utilità sul tipo di utilizzatore ----------
+  const isAmm = (d) => d.beneficiario === 'amministratore';
+  const regimeDi = (d) => (d.dataContratto ? FB.determinaRegime({ dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, dataImmatricolazione: d.dataImm, anno: S.anno }) : null);
+  const personaleAmm = (d) => isAmm(d) && d.usoAmm === 'personale';
+  const aziendaleAmm = (d) => isAmm(d) && d.usoAmm === 'aziendale';
+  /** Servono canone e km di lavoro (valore normale)? */
+  const serveNormale = (d) => {
+    if (aziendaleAmm(d)) return false;
+    if (personaleAmm(d)) return true;
+    const r = regimeDi(d);
+    return !!(r && r.valoreNormale);
+  };
+  const percTxt = (x) => (x == null ? '' : `${x}%`);
+
   // ---------- calcolo di un veicolo ----------
   function calcolaVeicolo(d, anno) {
     let ck = FB.num(d.ck) || 0, riga = null, mancante = false;
@@ -59,6 +75,8 @@
     const inp = {
       anno, dataImmatricolazione: d.dataImm, dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, alim: d.alim,
       categoria: d.categoria, co2: d.co2, ck, inizio: d.inizio, fine: d.fine, trattenuta: d.trattenuta, accessori: d.accessori,
+      beneficiario: d.beneficiario, usoAmm: isAmm(d) ? d.usoAmm : '', canone: d.canone, kmLavoro: d.kmLavoro, tariffaKm: d.tariffaKm,
+      titolo: d.titolo, addebito: d.addebito, costiAnnui: d.costiAnnui, ivaCosti: d.ivaCosti,
     };
     return { inp, riga, mancante, ck, res: FB.calcola(inp, S.regole) };
   }
@@ -103,21 +121,23 @@
       if (!d.dataContratto) e.dataContratto = 'Indica la data di stipula dell\'atto di assegnazione.';
       else if (d.dataImm && d.dataContratto < d.dataImm && FB.anno(d.dataContratto) < FB.anno(d.dataImm)) e.dataContratto = 'La data di assegnazione è precedente all\'immatricolazione: controlla le date.';
       if (!e.dataContratto) {
-        const reg = FB.determinaRegime({ dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, dataImmatricolazione: d.dataImm });
-        if (reg.chiave === 'co2' && d.alim !== 'elettrico' && d.co2 === '') e.co2 = 'Per il regime CO₂ serve il valore del campo V.7.';
+        const reg = regimeDi(d);
+        if (reg.chiave === 'co2' && d.alim !== 'elettrico' && d.co2 === '' && !personaleAmm(d) && !aziendaleAmm(d)) e.co2 = 'Per il regime CO₂ serve il valore del campo V.7.';
       }
     }
-    if (step === 3 && !(FB.num(d.ck) > 0)) e.ck = 'Seleziona il modello dalla tabella ACI oppure inserisci il costo chilometrico.';
+    if (step === 3 && !(FB.num(d.ck) > 0) && !personaleAmm(d) && !aziendaleAmm(d)) e.ck = 'Seleziona il modello dalla tabella ACI oppure inserisci il costo chilometrico.';
     if (step === 4) {
       if (d.inizio && d.fine && d.inizio > d.fine) e.fine = 'La data di fine è precedente all\'inizio.';
       if (d.trattenuta !== '' && !(FB.num(d.trattenuta) >= 0)) e.trattenuta = 'Importo non valido.';
+      if (personaleAmm(d) && !(FB.num(d.canone) > 0)) e.canone = 'Per l\'uso personale indica il costo annuo del veicolo (valore normale).';
+      for (const f of ['canone', 'kmLavoro', 'tariffaKm', 'costiAnnui', 'ivaCosti']) if (d[f] !== '' && !e[f] && !(FB.num(d[f]) >= 0)) e[f] = 'Importo non valido.';
     }
     return e;
   }
   const puoAndare = (i) => { for (let j = 1; j < i; j++) if (Object.keys(valida(j)).length) return false; return true; };
 
   // ---------- CALCOLO GUIDATO ----------
-  const PASSI = [['Veicolo', 'dal libretto'], ['Assegnazione', 'contratto e date'], ['Modello ACI', 'costo al km'], ['Periodo', 'e trattenute'], ['Risultato', 'e confronto']];
+  const PASSI = [['Veicolo', 'dal libretto'], ['Assegnazione', 'utilizzatore e date'], ['Modello ACI', 'costo al km'], ['Periodo', 'trattenute e costi'], ['Risultato', 'e confronto']];
 
   function renderCalcolo(errs = {}) {
     const root = $('#tab-calcolo');
@@ -173,8 +193,10 @@
 
   function passo2(e) {
     return `<div class="card"><h2>2. L'assegnazione al dipendente</h2>
-      <div class="need"><b>Cosa ci serve:</b> la data in cui è stato firmato l'atto di assegnazione del veicolo al dipendente (lettera o contratto di assegnazione).
+      <div class="need"><b>Cosa ci serve:</b> chi usa l'auto e la data in cui è stato firmato l'atto di assegnazione (lettera o contratto di assegnazione).
         È questa data – <u>non</u> quella di immatricolazione – a stabilire quale disciplina si applica.</div>
+      ${campo({ f: 'beneficiario', label: 'Chi usa l\'auto?', opts: [['dipendente', 'Dipendente'], ['amministratore', 'Amministratore o collaboratore coordinato e continuativo (co.co.co.)']], hint: 'Il reddito in natura si calcola allo stesso modo (redditi assimilati al lavoro dipendente); cambia la deducibilità per la società.' })}
+      ${campo({ f: 'usoAmm', label: 'Come usa l\'auto l\'amministratore?', opts: [['promiscuo', 'Uso promiscuo (aziendale e personale)'], ['personale', 'Solo uso personale'], ['aziendale', 'Solo uso aziendale']], wrapId: 'w-usoamm', hidden: true, hint: 'Promiscuo: forfait ACI. Solo personale: valore normale. Solo aziendale: nessun reddito in natura.' })}
       <div class="row2">
         ${campo({ f: 'dataContratto', label: 'Data dell\'atto di assegnazione', type: 'date', err: e.dataContratto, hint: 'Se l\'auto è stata riassegnata a un altro dipendente, indica la data del <b>primo</b> contratto valido per il regime.' })}
         ${campo({ f: 'dataOrdine', label: 'Data dell\'ordine del veicolo al concessionario / locatore', type: 'date', wrapId: 'w-ordine', hidden: true, hint: 'Per le assegnazioni del 2025: se l\'auto è stata <b>ordinata entro il 31.12.2024</b> resta il vecchio regime CO₂.' })}
@@ -187,8 +209,11 @@
     const d = S.d;
     const anno = d.dataContratto ? FB.anno(d.dataContratto) : 0;
     $('#w-ordine').hidden = anno !== 2025;
-    const reg = d.dataContratto ? FB.determinaRegime({ dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, dataImmatricolazione: d.dataImm, anno: S.anno }) : null;
-    $('#w-co2').hidden = !(reg && reg.chiave === 'co2');
+    $('#w-usoamm').hidden = !isAmm(d);
+    const reg = regimeDi(d);
+    $('#w-co2').hidden = !(reg && reg.chiave === 'co2') || personaleAmm(d) || aziendaleAmm(d);
+    if (aziendaleAmm(d)) { $('#regime-box').innerHTML = '<div class="note ok"><p><b>Nessun reddito in natura.</b> L\'auto è usata dall\'amministratore soltanto per uso aziendale: non c\'è nulla da assoggettare a tassazione. Resta la deducibilità dei costi per la società (passo 4).</p></div>'; return; }
+    if (personaleAmm(d)) { $('#regime-box').innerHTML = '<div class="note ok"><p><b>Disciplina applicabile: valore normale (art. 9 Tuir).</b></p><p>Uso esclusivamente personale: non è uso promiscuo, quindi il forfait ACI non si applica. Al passo 4 ti chiediamo il costo annuo del veicolo.</p></div>'; return; }
     $('#regime-box').innerHTML = reg
       ? `<div class="note ok"><p><b>Disciplina applicabile: ${esc(REGIMI[reg.chiave].nome)}</b></p><p>${esc(reg.motivo)}</p></div>${reg.avvisi.map((a) => `<div class="note warn"><p>${esc(a)}</p></div>`).join('')}`
       : '<div class="note"><p>Inserisci la data dell\'atto di assegnazione: ti diciamo subito quale regola si applica.</p></div>';
@@ -240,20 +265,42 @@
         ${campo({ f: 'fine', label: 'Fino al', type: 'date', err: e.fine, hint: 'Lascia vuoto se l\'assegnazione prosegue fino al 31 dicembre.' })}
       </div>
       <div id="dyn4-gg"></div>
+      <div id="w-normale" hidden>
+        <div class="note warn"><p id="normale-txt"></p></div>
+        ${campo({ f: 'canone', label: 'Canone annuo di leasing/noleggio, o costo annuo del veicolo (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 6.000,00"', err: e.canone, hint: 'Importo pagato dal datore di lavoro per l\'intero anno (verrà ragguagliato ai giorni di assegnazione).' })}
+        <div class="row2" id="w-kmlav">
+          ${campo({ f: 'kmLavoro', label: 'Km percorsi nell\'interesse del datore di lavoro nell\'anno', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 4.000"', err: e.kmLavoro, hint: 'Dentro e fuori dal Comune della sede di lavoro: documentali (note spese, registro viaggi).' })}
+          ${campo({ f: 'tariffaKm', label: 'Tariffa ACI al km (€/km)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="uguale al costo km del modello"', err: e.tariffaKm, hint: 'Se vuoto si usa il costo chilometrico del modello scelto al passo 3.' })}
+        </div>
+      </div>
       ${campo({ f: 'trattenuta', label: 'Importo trattenuto o pagato dal dipendente nell\'anno (€, Iva inclusa)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="0,00"', err: e.trattenuta, hint: 'Se è previsto un canone o un prezzo per l\'uso privato, il reddito è la differenza tra valore forfetario e quanto versato (al lordo dell\'Iva). Se cambi anno d\'imposta nel parco auto l\'importo viene riproposto uguale: aggiornalo.' })}
       ${checkbox({ f: 'accessori', label: 'L\'auto ha accessori o allestimenti non valorizzati nelle tabelle ACI e non acquistati direttamente dal dipendente', hint: 'Dal 2026 il valore è maggiorato del 5% (solo nuovo regime). Es. optional montati dal concessionario non compresi nella versione ACI.', wrapId: 'w-acc' })}
       <div class="row2">
-        ${campo({ f: 'dipendente', label: 'Dipendente (facoltativo)', attrs: 'autocomplete="off"' })}
+        ${campo({ f: 'dipendente', label: 'Utilizzatore (facoltativo)', attrs: 'autocomplete="off"' })}
         ${campo({ f: 'azienda', label: 'Azienda (facoltativo)', attrs: 'autocomplete="off"' })}
       </div>
+      <h3 style="margin-top:18px">Per la deducibilità (facoltativo)</h3>
+      <p class="muted">Servono per mostrarti, per questa targa, la deducibilità dei costi e dell'Iva e gli importi in euro.</p>
+      ${campo({ f: 'titolo', label: 'Come l\'azienda ha l\'auto', opts: [['', '— non so / non indicato —'], ['acquisto', 'Acquisto'], ['leasing', 'Leasing'], ['noleggio', 'Noleggio']], hint: 'Serve a indicarti il limite di costo, che conta quando la deducibilità è del 20%.' })}
+      <div class="row2">
+        ${campo({ f: 'costiAnnui', label: 'Costi annui del veicolo per l\'azienda (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 8.500,00"', err: e.costiAnnui, hint: 'Ammortamento o canone, assicurazione, bollo, carburante, manutenzione. Imponibile (Iva esclusa).' })}
+        ${campo({ f: 'ivaCosti', label: 'Iva sui costi annui (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 1.870,00"', err: e.ivaCosti, hint: 'Iva pagata sui costi indicati qui a sinistra.' })}
+      </div>
+      ${checkbox({ f: 'addebito', label: 'Al dipendente è addebitato un corrispettivo con fattura per l\'uso privato', hint: 'In questo caso l\'Iva sull\'auto è detraibile al 100%.', wrapId: 'w-addebito' })}
       ${navBtns('Calcola →')}</div>`;
   }
   function dyn4() {
     const d = S.d;
     const gg = FB.giorniAssegnazione(S.anno, d.inizio || d.dataContratto, d.fine), ga = FB.giorniNellAnno(S.anno);
     $('#dyn4-gg').innerHTML = `<div class="note"><p>Giorni di assegnazione nel ${S.anno}: <b>${gg}</b> su ${ga}${gg === 0 ? ' — controlla le date: nessun giorno cade nell\'anno scelto.' : ''}</p></div>`;
-    const reg = d.dataContratto ? FB.determinaRegime({ dataContratto: d.dataContratto, dataOrdine: d.dataOrdine }) : null;
-    $('#w-acc').hidden = !(reg && reg.chiave === 'nuovo');
+    const reg = regimeDi(d);
+    $('#w-acc').hidden = !(reg && reg.chiave === 'nuovo') || serveNormale(d) || aziendaleAmm(d);
+    $('#w-normale').hidden = !serveNormale(d);
+    $('#w-kmlav').hidden = personaleAmm(d);
+    $('#w-addebito').hidden = isAmm(d);
+    $('#normale-txt').innerHTML = personaleAmm(d)
+      ? '<b>Uso esclusivamente personale:</b> il compenso in natura è il valore normale dell\'auto (art. 9 Tuir). Indica il costo annuo sostenuto dalla società per il veicolo.'
+      : '<b>Veicolo usato assegnato quando la norma richiedeva la "nuova immatricolazione".</b> Per l\'Agenzia (Telefisco 2021) il benefit non è forfettario: si prende il canone di leasing/noleggio pagato dal datore di lavoro e si <b>scorpora l\'indennità chilometrica ACI</b> per i km percorsi nell\'interesse del datore di lavoro. Se non indichi i dati, l\'app mostra solo il forfait ACI come stima.';
   }
 
   // ---------- risultato ----------
@@ -265,13 +312,12 @@
         <div class="actions"><button class="btn ghost" data-nav="-1">← Indietro</button><div class="r"><button class="btn ghost" data-go="1">Rivedi i dati del libretto</button></div></div></div>`;
     }
     const mensile = r2(r.imponibile / 12);
-    const magg = r.giorni > r.giorniAnno / 2;
     const salvaTxt = S.editId ? 'Aggiorna nel parco auto' : 'Salva nel parco auto';
     const alt = r.confronto.map((x) => {
       if (x.errore) return `<tr class="dim"><td>${esc(REGIMI[x.chiave].nome)}</td><td colspan="3"><small>${esc(x.errore)}</small></td></tr>`;
       const dlt = r2(x.imponibile - r.imponibile);
       return `<tr class="${x.applicabile ? 'hl' : 'dim'}"><td>${esc(REGIMI[x.chiave].nome)} ${x.applicabile ? '<span class="pill">applicabile</span>' : '<span class="pill gray">solo confronto</span>'}</td>
-        <td class="num">${x.perc}%</td><td class="num">${eur(x.imponibile)}</td>
+        <td class="num">${x.perc != null ? x.perc + '%' : '—'}</td><td class="num">${eur(x.imponibile)}</td>
         <td class="num">${x.applicabile ? '—' : `<span class="delta ${dlt > 0 ? 'up' : 'down'}">${dlt > 0 ? '+' : ''}${eur(dlt)}</span>`}</td></tr>`;
     }).join('');
     return `<div class="card" id="risultato"><h2>5. Risultato — ${nome}</h2>
@@ -279,9 +325,9 @@
       ${c.mancante ? `<div class="note warn"><p>Il modello scelto non è nella tabella ${S.anno}: è stato usato l'ultimo costo km salvato (${n4(c.ck)}). Riseleziona il modello al passo 3.</p></div>` : ''}
       <div class="kpis">
         <div class="kpi"><small>Valore da assoggettare a tassazione (anno ${S.anno})</small><span class="big">${eur(r.imponibile)}</span></div>
-        <div class="kpi"><small>Fringe benefit annuo pieno</small><b>${eur(r.valoreAnnuo)}</b></div>
+        <div class="kpi"><small>${r.regime.chiave === 'normale' ? 'Valore del benefit (prima delle trattenute)' : 'Fringe benefit annuo pieno'}</small><b>${eur(r.valoreAnnuo)}</b></div>
         <div class="kpi"><small>Equivalente mensile (÷ 12)</small><b>${eur(mensile)}</b></div>
-        <div class="kpi"><small>Disciplina</small><b>${esc(REGIMI[r.regime.chiave].breve)} · ${r.perc}%</b></div>
+        <div class="kpi"><small>Disciplina</small><b>${esc(REGIMI[r.regime.chiave].breve)}${r.perc != null ? ' · ' + r.perc + '%' : ''}</b></div>
       </div>
       <div class="note ok"><p><b>Perché questa disciplina?</b> ${esc(r.regime.motivo)}</p></div>
       ${r.regime.avvisi.map((a) => `<div class="note warn"><p>${esc(a)}</p></div>`).join('')}
@@ -290,16 +336,28 @@
         <tfoot><tr><td>Valore imponibile del dipendente</td><td class="num">${eur(r.imponibile)}</td></tr></tfoot></table></div>
       <p><small>Il valore concorre al reddito di lavoro dipendente (Irpef, addizionali, contributi). Il costo chilometrico di esercizio proviene dalle tabelle ACI pubblicate in G.U. con effetto dall'anno d'imposta.</small></p>
     </div>
-    <div class="card"><h3>Confronto con le altre discipline (stessi dati)</h3>
+    ${r.confronto.length ? `<div class="card"><h3>Confronto con le altre discipline (stessi dati)</h3>
       <p class="muted">Utile per valutare il passaggio al nuovo regime, per esempio in caso di rinnovo o sostituzione dell'auto.</p>
       <div class="scroll"><table><thead><tr><th>Disciplina</th><th class="num">%</th><th class="num">Imponibile ${S.anno}</th><th class="num">Differenza rispetto a questa auto</th></tr></thead><tbody>${alt}</tbody></table></div>
-      <p><small>I regimi "solo confronto" non sono applicabili a questa auto in base alla data del contratto: mostrano cosa cambierebbe con un nuovo contratto.</small></p></div>
-    <div class="card"><h3>Costi dell'auto per l'azienda</h3>
-      <ul><li><b>Deducibilità dei costi:</b> ${magg ? '<b>70%</b> (art. 164, c. 1, lett. b-bis Tuir): l\'auto è assegnata per la maggior parte del periodo d\'imposta. Vale indipendentemente dal valore dell\'auto e dall\'importo del fringe benefit, senza i limiti di costo; al dipendente si attribuisce un compenso in natura pari al fringe benefit.'
-        : '<b>20%</b> (art. 164, c. 1, lett. b Tuir): l\'assegnazione non copre la maggior parte del periodo d\'imposta, quindi valgono le regole generali, con i limiti di costo (18.075,99 € per acquisto/leasing, 3.615,20 € per noleggio).'}</li>
-        <li><b>Iva:</b> detraibile al 40%; al 100% se si addebita al dipendente un corrispettivo con fattura.</li></ul></div>
+      <p><small>I regimi "solo confronto" non sono applicabili a questa auto in base alla data del contratto: mostrano cosa cambierebbe con un nuovo contratto.</small></p></div>` : ''}
+    ${deducibilitaCard(c.inp, r)}
     <div class="actions noprint"><div><button class="btn ghost" data-go="1">← Modifica i dati</button></div>
       <div class="r"><button class="btn ghost" data-act="stampa">Stampa / PDF</button><button class="btn ghost" data-act="nuovo">Nuovo calcolo</button><button class="btn" data-act="salva">${salvaTxt}</button></div></div>`;
+  }
+
+  function deducibilitaCard(inp, r) {
+    const dd = FB.deducibilita(inp, r);
+    const haCosti = dd.imposte.importo != null;
+    return `<div class="card"><h3>Deducibilità per l'azienda</h3>
+      <p class="muted">${esc(dd.caso)}</p>
+      <div class="scroll"><table><thead><tr><th></th><th>Regola</th><th class="num">Importo</th></tr></thead><tbody>
+        <tr><td><b>Imposte dirette</b><br>${dd.imposte.perc != null ? `<span class="pill">${dd.imposte.perc}%</span>` : '<span class="pill gray">regola mista</span>'}</td><td>${esc(dd.imposte.testo)}</td><td class="num">${haCosti ? `<b>${eur(dd.imposte.importo)}</b><br><small>deducibili</small>` : '—'}</td></tr>
+        <tr><td><b>Iva</b><br><span class="pill">${dd.iva.perc}%</span></td><td>${esc(dd.iva.testo)}</td><td class="num">${dd.iva.detraibile != null ? `<b>${eur(dd.iva.detraibile)}</b><br><small>detraibile</small><br>${eur(dd.iva.indetraibile)}<br><small>indetraibile</small>` : '—'}</td></tr>
+      </tbody></table></div>
+      ${dd.limiti.map((l) => `<div class="note warn"><p>${esc(l)}</p></div>`).join('')}
+      ${dd.note.map((l) => `<div class="note"><p>${esc(l)}</p></div>`).join('')}
+      ${haCosti || dd.iva.detraibile != null ? '' : '<p><small>Per vedere gli importi in euro inserisci i costi annui e l\'Iva al passo 4.</small></p>'}
+    </div>`;
   }
 
   // ---------- eventi del calcolo guidato ----------
@@ -366,18 +424,45 @@
       const nuovoVal = nu && !nu.errore ? nu.imponibile : null;
       totImp += r.imponibile; totNuovo += nuovoVal ?? r.imponibile;
       const dlt = nuovoVal == null || r.regime.chiave === 'nuovo' ? null : r2(nuovoVal - r.imponibile);
-      return `<tr><td>${nm}${c.mancante ? '<br><span class="pill warn">modello non in tabella ' + S.anno + '</span>' : ''}</td><td>${esc(rec.d.dipendente)}</td>
-        <td><span class="pill ${r.regime.chiave === 'nuovo' ? '' : 'gray'}">${esc(REGIMI[r.regime.chiave].breve)}</span> <small>${r.perc}%</small></td>
+      return `<tr><td>${nm}${c.mancante ? '<br><span class="pill warn">modello non in tabella ' + S.anno + '</span>' : ''}</td><td>${esc(rec.d.dipendente || (isAmm(rec.d) ? 'Amministratore' : 'Dipendente'))}</td>
+        <td><span class="pill ${r.regime.chiave === 'nuovo' ? '' : 'gray'}">${esc(REGIMI[r.regime.chiave].breve)}</span> <small>${percTxt(r.perc)}</small></td>
         <td class="num">${eur(r.valoreAnnuo)}</td><td class="num"><b>${eur(r.imponibile)}</b></td>
         <td class="num">${nuovoVal == null ? '—' : eur(nuovoVal)}</td><td class="num">${dlt == null ? '—' : `<span class="delta ${dlt > 0 ? 'up' : 'down'}">${dlt > 0 ? '+' : ''}${eur(dlt)}</span>`}</td>${az}</tr>`;
     }).join('');
     root.innerHTML = `<div class="card"><h2>Parco auto — anno d'imposta ${S.anno}</h2>
       <p class="muted">Ogni riga è ricalcolata con le tabelle ACI e le regole dell'anno selezionato in alto. Cambia anno per vedere l'effetto dell'aggiornamento annuale.</p>
-      <div class="scroll"><table><thead><tr><th>Veicolo</th><th>Dipendente</th><th>Disciplina</th><th class="num">Fringe annuo pieno</th><th class="num">Imponibile ${S.anno}</th><th class="num">Se nuovo regime</th><th class="num">Differenza</th><th></th></tr></thead>
+      <div class="scroll"><table><thead><tr><th>Veicolo</th><th>Utilizzatore</th><th>Disciplina</th><th class="num">Fringe annuo pieno</th><th class="num">Imponibile ${S.anno}</th><th class="num">Se nuovo regime</th><th class="num">Differenza</th><th></th></tr></thead>
         <tbody>${righe}</tbody>
         <tfoot><tr><td colspan="4">Totale</td><td class="num">${eur(totImp)}</td><td class="num">${eur(totNuovo)}</td><td class="num">${totNuovo - totImp ? eur(r2(totNuovo - totImp)) : '—'}</td><td></td></tr></tfoot></table></div>
-      <div class="actions noprint"><div class="r"><button class="btn ghost" data-fl="csv">Esporta CSV</button><button class="btn ghost" data-fl="backup">Backup (JSON)</button><button class="btn ghost" data-fl="import">Ripristina backup</button></div>
+      </div>
+    ${deducibilitaFlotta()}
+    <div class="card"><div class="actions noprint" style="margin-top:0"><div class="r"><button class="btn ghost" data-fl="csv">Esporta CSV</button><button class="btn ghost" data-fl="backup">Backup (JSON)</button><button class="btn ghost" data-fl="import">Ripristina backup</button></div>
         <div class="r"><button class="btn" data-tab-link="calcolo">+ Aggiungi veicolo</button></div></div></div>`;
+  }
+
+  /** Tabella riepilogativa: deducibilità di imposte dirette e Iva per ogni targa del parco auto. */
+  function deducibilitaFlotta() {
+    let totCosti = 0, totDed = 0, totIvaD = 0, totIvaI = 0, haImporti = false;
+    const righe = S.flotta.map((rec) => {
+      const c = calcolaVeicolo(rec.d, S.anno), d = rec.d;
+      const nome = `<b>${esc(d.targa || nomeVeicolo(d))}</b>${d.targa ? `<br><small>${esc([d.marca, d.modello].filter(Boolean).join(' '))}</small>` : ''}`;
+      if (c.res.errore) return `<tr><td>${nome}</td><td colspan="7"><span class="pill warn">da completare</span> <small>${esc(c.res.errore)}</small></td></tr>`;
+      const dd = FB.deducibilita(c.inp, c.res);
+      const costi = FB.num(d.costiAnnui) || 0;
+      if (dd.imposte.importo != null) { totCosti += costi; totDed += dd.imposte.importo; haImporti = true; }
+      if (dd.iva.detraibile != null) { totIvaD += dd.iva.detraibile; totIvaI += dd.iva.indetraibile; }
+      const chi = isAmm(d) ? `Amministratore/co.co.co.<br><small>${{ promiscuo: 'uso promiscuo', personale: 'uso personale', aziendale: 'uso aziendale' }[d.usoAmm]}</small>` : `Dipendente${d.dipendente ? `<br><small>${esc(d.dipendente)}</small>` : ''}`;
+      return `<tr><td>${nome}</td><td>${chi}</td>
+        <td>${dd.imposte.perc != null ? `<span class="pill">${dd.imposte.perc}%</span>` : '<span class="pill gray">compenso + 20%</span>'}</td>
+        <td class="num">${costi ? eur(costi) : '—'}</td><td class="num">${dd.imposte.importo != null ? `<b>${eur(dd.imposte.importo)}</b>` : '—'}</td>
+        <td><span class="pill">${dd.iva.perc}%</span></td><td class="num">${dd.iva.detraibile != null ? eur(dd.iva.detraibile) : '—'}</td><td class="num">${dd.iva.indetraibile != null ? eur(dd.iva.indetraibile) : '—'}</td></tr>`;
+    }).join('');
+    return `<div class="card"><h2>Deducibilità per targa — ${S.anno}</h2>
+      <p class="muted">Calcolata in base a utilizzatore, uso, giorni di assegnazione e ai costi che hai indicato al passo 4 di ogni auto. La percentuale c'è sempre; gli importi compaiono se hai inserito costi e Iva.</p>
+      <div class="scroll"><table><thead><tr><th>Targa</th><th>Utilizzatore</th><th>Imposte dirette</th><th class="num">Costi annui</th><th class="num">Costi deducibili</th><th>Iva</th><th class="num">Iva detraibile</th><th class="num">Iva indetraibile</th></tr></thead>
+        <tbody>${righe}</tbody>
+        <tfoot><tr><td colspan="3">Totale</td><td class="num">${haImporti ? eur(totCosti) : '—'}</td><td class="num">${haImporti ? eur(totDed) : '—'}</td><td></td><td class="num">${totIvaD || totIvaI ? eur(r2(totIvaD)) : '—'}</td><td class="num">${totIvaD || totIvaI ? eur(r2(totIvaI)) : '—'}</td></tr></tfoot></table></div>
+      <p><small>Dipendenti: 70% se l'auto è assegnata per più di metà anno (altrimenti 20% con limiti di costo), Iva 40% (100% con corrispettivo addebitato). Amministratori: compenso in natura + 20% dell'eccedenza (promiscuo), solo il compenso (personale), 20% (aziendale); Iva 40%.</small></p></div>`;
   }
   $('#tab-flotta').addEventListener('click', (ev) => {
     const lnk = ev.target.closest('[data-tab-link]'); if (lnk) { ev.preventDefault(); if (lnk.dataset.tabLink === 'calcolo') { S.editId = null; S.d = nuoviDati(); S.step = 1; S.qChiave = null; } setTab(lnk.dataset.tabLink); return; }
@@ -399,12 +484,15 @@
   });
   function esportaCsvFlotta() {
     const num = (n) => String(n).replace('.', ',');
-    const head = ['Targa', 'Marca', 'Modello', 'Dipendente', 'Prima immatricolazione', 'Data contratto', 'Disciplina', 'Percentuale', 'Costo km ACI', 'Fringe annuo pieno', 'Giorni', `Imponibile ${S.anno}`, 'Imponibile con nuovo regime'];
+    const head = ['Targa', 'Marca', 'Modello', 'Dipendente', 'Prima immatricolazione', 'Data contratto', 'Disciplina', 'Percentuale', 'Costo km ACI', 'Fringe annuo pieno', 'Giorni', `Imponibile ${S.anno}`, 'Imponibile con nuovo regime', 'Tipo utilizzatore', 'Imposte dirette %', 'Costi annui', 'Costi deducibili', 'Iva detraibile %', 'Iva detraibile', 'Iva indetraibile'];
     const rows = S.flotta.map((rec) => {
       const c = calcolaVeicolo(rec.d, S.anno), r = c.res, d = rec.d;
       if (r.errore) return [d.targa, d.marca, d.modello, d.dipendente, d.dataImm, d.dataContratto, 'DA COMPLETARE: ' + r.errore];
       const nu = r.confronto.find((x) => x.chiave === 'nuovo');
-      return [d.targa, d.marca, d.modello, d.dipendente, d.dataImm, d.dataContratto, REGIMI[r.regime.chiave].nome, r.perc, num(c.ck), num(r.valoreAnnuo.toFixed(2)), r.giorni, num(r.imponibile.toFixed(2)), nu && !nu.errore ? num(nu.imponibile.toFixed(2)) : ''];
+      const dd = FB.deducibilita(c.inp, r);
+      return [d.targa, d.marca, d.modello, d.dipendente, d.dataImm, d.dataContratto, REGIMI[r.regime.chiave].nome, r.perc ?? '', num(c.ck), num(r.valoreAnnuo.toFixed(2)), r.giorni, num(r.imponibile.toFixed(2)), nu && !nu.errore ? num(nu.imponibile.toFixed(2)) : '',
+        isAmm(d) ? `Amministratore (${d.usoAmm})` : 'Dipendente', dd.imposte.perc ?? 'compenso + 20% eccedenza', d.costiAnnui ? num(FB.num(d.costiAnnui).toFixed(2)) : '', dd.imposte.importo != null ? num(dd.imposte.importo.toFixed(2)) : '',
+        dd.iva.perc, dd.iva.detraibile != null ? num(dd.iva.detraibile.toFixed(2)) : '', dd.iva.indetraibile != null ? num(dd.iva.indetraibile.toFixed(2)) : ''];
     });
     scarica(`fringe-benefit-${S.anno}.csv`, '﻿' + [head, ...rows].map((l) => l.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\n'), 'text/csv');
   }
@@ -430,6 +518,15 @@
       <li>Il valore è aumentato del <b>5%</b> in presenza di accessori o allestimenti non valorizzati nelle tabelle ACI e non acquistati direttamente dal lavoratore.</li>
       <li>Sono fatti salvi i comportamenti tenuti dai datori di lavoro fino al 31.12.2025 sulla tassazione di accessori e allestimenti.</li>
       <li>Dal 1.01.2027 le norme confluiscono nei nuovi Testi unici (Iva e imposte sui redditi) senza modifiche di sostanza.</li></ul></div>
+    <div class="card"><h2>Amministratori e collaboratori coordinati e continuativi</h2><ul>
+      <li><b>Reddito in natura:</b> è assimilato al lavoro dipendente, quindi per l'uso promiscuo si applica lo stesso forfait ACI del dipendente.</li>
+      <li><b>Uso solo personale:</b> non è uso promiscuo, quindi niente forfait: il compenso è al valore normale (art. 9 Tuir).</li>
+      <li><b>Uso solo aziendale:</b> nessun reddito in natura.</li>
+      <li><b>Deducibilità per la società</b> (art. 95 c. 5 e art. 164 Tuir): uso promiscuo = compenso in natura + 20% dell'eccedenza delle spese (con limite di costo); uso personale = solo il compenso in natura; uso aziendale = 20% con limite di costo. Non vale il 70% previsto per i dipendenti.</li></ul></div>
+    <div class="card"><h2>Auto usata assegnata dopo il 2020 (valore normale)</h2>
+      <p>Il regime CO₂ riguarda i veicoli di <b>nuova immatricolazione</b> (dal 1.07.2020). Per un'auto immatricolata prima di quella data e assegnata dopo, secondo l'Agenzia (Telefisco 2021, risoluzione 46/2020) il benefit si valorizza al <b>valore normale</b>:
+        canone di leasing o noleggio pagato dal datore di lavoro, <b>meno</b> l'indennità chilometrica ACI per i chilometri percorsi nell'interesse del datore di lavoro (dentro e fuori dal Comune della sede), <b>meno</b> quanto trattiene il dipendente.
+        L'app lo calcola quando inserisci canone e chilometri; lo stesso vale per un'auto usata assegnata nel 2025.</p></div>
     <div class="card"><h2>Checklist per aggiornare la tassazione</h2><ol>
       <li><b>Censisci le auto assegnate</b>: per ognuna serve data di prima immatricolazione (B), alimentazione (P.3), CO₂ (V.7) e data dell'atto di assegnazione (e dell'ordine se concessa nel 2025).</li>
       <li><b>Individua la disciplina</b> di ciascuna auto: l'app lo fa dalle date, spiegandoti il perché.</li>

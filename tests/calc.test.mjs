@@ -116,3 +116,82 @@ test('Anno 2025: avviso per auto non di nuova immatricolazione nel nuovo regime'
   assert.equal(g.chiave, 'nuovo'); assert.equal(g.avvisi.length, 1);
   assert.equal(FB.determinaRegime({ anno: 2026, dataContratto: '2025-05-01', dataImmatricolazione: '2022-01-01' }).avvisi.length, 0);
 });
+
+// ---------- valore normale (veicolo usato, Telefisco 2021) ----------
+const usata = { ...base, ck: 0.5, co2: 120, dataImmatricolazione: '2019-03-01', dataContratto: '2021-01-15', alim: 'benzina' };
+
+test('Veicolo immatricolato prima del 07/2020 e assegnato dopo: senza canone resta il forfait indicativo con avviso', () => {
+  const r = FB.calcola(usata, R);
+  assert.equal(r.regime.chiave, 'co2');
+  assert.ok(r.regime.avvisi.some((a) => /valore normale/.test(a)));
+});
+
+test('Valore normale = canone ragguagliato − (km lavoro × tariffa ACI) − trattenute', () => {
+  const r = FB.calcola({ ...usata, anno: 2026, inizio: '2026-01-01', canone: '6000', kmLavoro: '4000', tariffaKm: '0,4', trattenuta: 100 }, R);
+  assert.equal(r.regime.chiave, 'normale');
+  assert.equal(r.valoreAnnuo, 6000 - 1600);
+  assert.equal(r.imponibile, 4300);
+  assert.equal(r.confronto[0].chiave, 'normale'); assert.equal(r.confronto[0].applicabile, true);
+});
+
+test('Valore normale: la tariffa di default è il costo km ACI; canone ragguagliato ai giorni; mai negativo', () => {
+  const r = FB.calcola({ ...usata, anno: 2026, inizio: '2026-07-01', canone: 3650, kmLavoro: 100 }, R);
+  assert.equal(r.giorni, 184);
+  assert.equal(r.valoreAnnuo, FB.r2(3650 * 184 / 365 - 50));
+  const neg = FB.calcola({ ...usata, anno: 2026, canone: 1000, kmLavoro: 100000 }, R);
+  assert.equal(neg.imponibile, 0);
+});
+
+test('Auto usata assegnata nel 2025 (nuovo regime): valore normale solo per il 2025, non dal 2026', () => {
+  const d = { ...base, anno: 2025, ck: 0.5, dataContratto: '2025-04-01', dataImmatricolazione: '2022-01-01', canone: 5000 };
+  assert.equal(FB.calcola(d, R).regime.chiave, 'normale');
+  assert.equal(FB.calcola({ ...d, anno: 2026 }, R).regime.chiave, 'nuovo');
+});
+
+// ---------- amministratori / co.co.co. ----------
+test('Amministratore, uso aziendale: nessun reddito in natura', () => {
+  const r = FB.calcola({ ...base, ck: 0.5, beneficiario: 'amministratore', usoAmm: 'aziendale', dataContratto: '2026-01-01', dataImmatricolazione: '2026-01-01' }, R);
+  assert.equal(r.imponibile, 0); assert.equal(r.regime.chiave, 'nessuno');
+});
+
+test('Amministratore, uso promiscuo: stesso forfait ACI del dipendente', () => {
+  const x = { ...base, ck: 0.5, dataContratto: '2026-01-01', dataImmatricolazione: '2026-01-01' };
+  assert.equal(FB.calcola({ ...x, beneficiario: 'amministratore', usoAmm: 'promiscuo' }, R).imponibile, FB.calcola(x, R).imponibile);
+});
+
+test('Amministratore, uso personale: valore normale = costo annuo, senza scorporo km', () => {
+  const r = FB.calcola({ ...base, ck: 0.5, beneficiario: 'amministratore', usoAmm: 'personale', canone: 4000, kmLavoro: 9999, dataContratto: '2026-01-01' }, R);
+  assert.equal(r.imponibile, 4000);
+  assert.ok(FB.calcola({ ...base, ck: 0.5, beneficiario: 'amministratore', usoAmm: 'personale', dataContratto: '2026-01-01' }, R).errore);
+});
+
+// ---------- deducibilità ----------
+const fringe = (giorni = 365, imponibile = 5000) => ({ imponibile, giorni, giorniAnno: 365 });
+
+test('Dipendente, maggior parte dell\'anno: costi 70%, Iva 40% (100% con corrispettivo)', () => {
+  const d = FB.deducibilita({ costiAnnui: '10.000,00', ivaCosti: 2200 }, fringe());
+  assert.equal(d.imposte.perc, 70); assert.equal(d.imposte.importo, 7000);
+  assert.equal(d.iva.perc, 40); assert.equal(d.iva.detraibile, 880); assert.equal(d.iva.indetraibile, 1320);
+  assert.equal(FB.deducibilita({ costiAnnui: 1000, ivaCosti: 220, addebito: true }, fringe()).iva.detraibile, 220);
+});
+
+test('Dipendente, assegnazione per meno di metà anno: 20% con limiti, Iva 40%', () => {
+  const d = FB.deducibilita({ costiAnnui: 10000, titolo: 'noleggio' }, fringe(100));
+  assert.equal(d.imposte.perc, 20); assert.equal(d.imposte.importo, 2000);
+  assert.match(d.limiti[0], /723,04/);
+});
+
+test('Amministratore uso promiscuo: esempio ebook p. 43 → 10.000 + 20% × 2.019 = 10.403,80', () => {
+  const d = FB.deducibilita({ beneficiario: 'amministratore', usoAmm: 'promiscuo', costiAnnui: 12019 }, fringe(365, 10000));
+  assert.equal(d.imposte.importo, 10403.8);
+});
+
+test('Amministratore: uso personale deduce il compenso in natura entro i costi; uso aziendale 20%', () => {
+  assert.equal(FB.deducibilita({ beneficiario: 'amministratore', usoAmm: 'personale', costiAnnui: 3000 }, fringe(365, 5000)).imposte.importo, 3000);
+  assert.equal(FB.deducibilita({ beneficiario: 'amministratore', usoAmm: 'aziendale', costiAnnui: 5000 }, fringe(365, 0)).imposte.importo, 1000);
+});
+
+test('Numeri: il punto con tre cifre dopo è separatore delle migliaia, non decimale', () => {
+  assert.equal(FB.num('8.000'), 8000); assert.equal(FB.num('1.234.567'), 1234567); assert.equal(FB.num('12.500'), 12500);
+  assert.equal(FB.num('0.577'), 0.577); assert.equal(FB.num('0.5777'), 0.5777); assert.equal(FB.num('88.0'), 88); assert.equal(FB.num('1234.5'), 1234.5);
+});
