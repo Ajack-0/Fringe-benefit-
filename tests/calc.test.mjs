@@ -90,3 +90,29 @@ test('Confronto: tre regimi sugli stessi dati', () => {
   assert.deepEqual(r.confronto.map((c) => c.applicabile), [false, true, false]);
   assert.deepEqual(r.confronto.map((c) => c.valoreAnnuo), [2250, 2250, 3750]);
 });
+
+test('Numeri con virgola o punto: costo km, CO2 e trattenuta', () => {
+  assert.equal(FB.num('0,5777'), 0.5777); assert.equal(FB.num('0.5777'), 0.5777);
+  assert.equal(FB.num('1.234,56'), 1234.56); assert.equal(FB.num('88,0'), 88); assert.ok(Number.isNaN(FB.num('')));
+  const r = FB.calcolaRegime('co2', { ...base, ck: '0,5', co2: '160,4', trattenuta: '100,50', dataImmatricolazione: '2024-01-01' }, R);
+  assert.equal(r.perc, 50); // 160,4 g/km supera la soglia di 160
+  assert.equal(r.imponibile, FB.r2(3750 - 100.5));
+});
+
+test('Inizio non indicato: si parte dalla data dell\'atto di assegnazione se cade nell\'anno', () => {
+  const r = FB.calcolaRegime('nuovo', { ...base, ck: 0.5, dataContratto: '2026-07-01', dataImmatricolazione: '2026-06-01' }, R);
+  assert.equal(r.giorni, 184);
+  const r2 = FB.calcolaRegime('nuovo', { ...base, ck: 0.5, dataContratto: '2025-03-01', dataImmatricolazione: '2025-01-01' }, R);
+  assert.equal(r2.giorni, 365);
+});
+
+test('Regole incomplete: errore chiaro invece di NaN', () => {
+  const rotte = [{ ...R[1], km: null }];
+  assert.match(FB.calcolaRegime('nuovo', { ...base, ck: 0.5, dataImmatricolazione: '2026-01-01' }, rotte).errore, /regole/);
+});
+
+test('Anno 2025: avviso per auto non di nuova immatricolazione nel nuovo regime', () => {
+  const g = FB.determinaRegime({ anno: 2025, dataContratto: '2025-05-01', dataImmatricolazione: '2022-01-01' });
+  assert.equal(g.chiave, 'nuovo'); assert.equal(g.avvisi.length, 1);
+  assert.equal(FB.determinaRegime({ anno: 2026, dataContratto: '2025-05-01', dataImmatricolazione: '2022-01-01' }).avvisi.length, 0);
+});

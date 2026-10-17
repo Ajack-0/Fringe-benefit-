@@ -39,7 +39,8 @@ def parse(testo):
     righe, alim, prod, sotto, pcts = [], None, True, "", []
     anomalie = []
     for raw in testo.splitlines():
-        riga = raw.strip()
+        # il PDF della G.U. contiene a volte "É" codificata male ("Ã" + carattere di controllo)
+        riga = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", re.sub(r"\u00c3[\x00-\x1f\x7f-\x9f]?(?=\s|$)", "\u00c9", raw)).strip()
         if not riga:
             continue
         up = riga.upper()

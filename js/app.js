@@ -51,7 +51,7 @@
 
   // ---------- calcolo di un veicolo ----------
   function calcolaVeicolo(d, anno) {
-    let ck = Number(d.ck) || 0, riga = null, mancante = false;
+    let ck = FB.num(d.ck) || 0, riga = null, mancante = false;
     if (d.aciKey && !d.ckManuale) {
       riga = ACI.perChiave(anno, d.aciKey);
       if (riga) ck = riga.ck; else mancante = true;
@@ -97,7 +97,7 @@
     if (step === 1) {
       if (!d.dataImm) e.dataImm = 'Indica la data di prima immatricolazione (campo B).';
       if (!d.alim) e.alim = 'Seleziona l\'alimentazione (campo P.3).';
-      if (d.co2 !== '' && !(Number(d.co2) >= 0)) e.co2 = 'Valore non valido.';
+      if (d.co2 !== '' && !(FB.num(d.co2) >= 0)) e.co2 = 'Valore non valido.';
     }
     if (step === 2) {
       if (!d.dataContratto) e.dataContratto = 'Indica la data di stipula dell\'atto di assegnazione.';
@@ -107,10 +107,10 @@
         if (reg.chiave === 'co2' && d.alim !== 'elettrico' && d.co2 === '') e.co2 = 'Per il regime CO₂ serve il valore del campo V.7.';
       }
     }
-    if (step === 3 && !(Number(d.ck) > 0)) e.ck = 'Seleziona il modello dalla tabella ACI oppure inserisci il costo chilometrico.';
+    if (step === 3 && !(FB.num(d.ck) > 0)) e.ck = 'Seleziona il modello dalla tabella ACI oppure inserisci il costo chilometrico.';
     if (step === 4) {
       if (d.inizio && d.fine && d.inizio > d.fine) e.fine = 'La data di fine è precedente all\'inizio.';
-      if (d.trattenuta !== '' && !(Number(d.trattenuta) >= 0)) e.trattenuta = 'Importo non valido.';
+      if (d.trattenuta !== '' && !(FB.num(d.trattenuta) >= 0)) e.trattenuta = 'Importo non valido.';
     }
     return e;
   }
@@ -151,7 +151,7 @@
       <div id="dyn1-cat"></div>
       ${campo({ f: 'alim', label: 'Alimentazione', code: 'P.3', err: e.alim, opts: [['', '— seleziona —'], ...Object.entries(ALIMENTAZIONI).map(([k, v]) => [k, v.nome])], hint: 'Sul libretto: BENZ = benzina, DIESEL = gasolio, ELETTR = elettrico. Gli ibridi riportano due alimentazioni (es. BENZ/ELETTR): se si ricaricano anche dalla presa sono <b>plug-in</b>.' })}
       <div class="row2">
-        ${campo({ f: 'co2', label: 'Emissioni di CO₂ (g/km)', code: 'V.7', type: 'number', attrs: 'min="0" step="1" inputmode="numeric"', err: e.co2, hint: 'Obbligatoria solo per le auto assegnate dal 1.07.2020 al 31.12.2024 (e ordinate entro il 2024). Per i veicoli elettrici lascia vuoto.' })}
+        ${campo({ f: 'co2', label: 'Emissioni di CO₂ (g/km)', code: 'V.7', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 88,0"', err: e.co2, hint: 'Obbligatoria solo per le auto assegnate dal 1.07.2020 al 31.12.2024 (e ordinate entro il 2024). Per i veicoli elettrici lascia vuoto.' })}
         ${campo({ f: 'kw', label: 'Potenza netta massima (kW)', code: 'P.2', type: 'number', attrs: 'min="0" step="1" inputmode="numeric"', hint: '<span id="kw-cv">Le tabelle ACI indicano la potenza in CV (1 kW ≈ 1,36 CV).</span>' })}
       </div>
       <div class="row2">
@@ -179,7 +179,7 @@
         ${campo({ f: 'dataContratto', label: 'Data dell\'atto di assegnazione', type: 'date', err: e.dataContratto, hint: 'Se l\'auto è stata riassegnata a un altro dipendente, indica la data del <b>primo</b> contratto valido per il regime.' })}
         ${campo({ f: 'dataOrdine', label: 'Data dell\'ordine del veicolo al concessionario / locatore', type: 'date', wrapId: 'w-ordine', hidden: true, hint: 'Per le assegnazioni del 2025: se l\'auto è stata <b>ordinata entro il 31.12.2024</b> resta il vecchio regime CO₂.' })}
       </div>
-      ${campo({ f: 'co2', label: 'Emissioni di CO₂ (g/km)', code: 'V.7', type: 'number', attrs: 'min="0" step="1"', wrapId: 'w-co2', hidden: true, err: e.co2, hint: 'Nel regime CO₂ la percentuale dipende dalle emissioni: ≤ 60 → 25%, ≤ 160 → 30%, ≤ 190 → 50%, oltre → 60%.' })}
+      ${campo({ f: 'co2', label: 'Emissioni di CO₂ (g/km)', code: 'V.7', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 88,0"', wrapId: 'w-co2', hidden: true, err: e.co2, hint: 'Nel regime CO₂ la percentuale dipende dalle emissioni: ≤ 60 → 25%, ≤ 160 → 30%, ≤ 190 → 50%, oltre → 60%.' })}
       <div id="regime-box"></div>
       ${navBtns()}</div>`;
   }
@@ -187,7 +187,7 @@
     const d = S.d;
     const anno = d.dataContratto ? FB.anno(d.dataContratto) : 0;
     $('#w-ordine').hidden = anno !== 2025;
-    const reg = d.dataContratto ? FB.determinaRegime({ dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, dataImmatricolazione: d.dataImm }) : null;
+    const reg = d.dataContratto ? FB.determinaRegime({ dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, dataImmatricolazione: d.dataImm, anno: S.anno }) : null;
     $('#w-co2').hidden = !(reg && reg.chiave === 'co2');
     $('#regime-box').innerHTML = reg
       ? `<div class="note ok"><p><b>Disciplina applicabile: ${esc(REGIMI[reg.chiave].nome)}</b></p><p>${esc(reg.motivo)}</p></div>${reg.avvisi.map((a) => `<div class="note warn"><p>${esc(a)}</p></div>`).join('')}`
@@ -209,7 +209,7 @@
       <div id="q-sel" style="margin-top:12px"></div>
       <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
       ${checkbox({ f: 'ckManuale', label: 'Non trovo il modello: inserisco il costo chilometrico a mano', hint: 'Valore "Costo km 15.000 km" della tabella ACI del modello più simile (€/km, 4 decimali).' })}
-      ${campo({ f: 'ck', label: 'Costo chilometrico ACI su 15.000 km (€/km)', type: 'number', attrs: 'min="0" step="0.0001" inputmode="decimal"', wrapId: 'w-ck', err: e.ck, hidden: !d.ckManuale })}
+      ${campo({ f: 'ck', label: 'Costo chilometrico ACI su 15.000 km (€/km)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 0,5777"', wrapId: 'w-ck', err: e.ck, hidden: !d.ckManuale })}
       ${e.ck && !d.ckManuale ? `<div class="errmsg">${esc(e.ck)}</div>` : ''}
       ${navBtns()}</div>`;
   }
@@ -236,11 +236,11 @@
       <div class="need"><b>Cosa ci serve:</b> per quanti giorni dell'anno ${S.anno} l'auto è stata assegnata (il valore va ragguagliato ai giorni, a prescindere dall'uso effettivo) e
         se il dipendente paga qualcosa per l'uso privato (trattenuta in busta paga o canone), perché va sottratto dal valore tassabile.</div>
       <div class="row2">
-        ${campo({ f: 'inizio', label: `Assegnata dal (anno ${S.anno})`, type: 'date', hint: 'Lascia vuoto se l\'auto era già assegnata dal 1° gennaio.' })}
+        ${campo({ f: 'inizio', label: `Assegnata dal (anno ${S.anno})`, type: 'date', hint: 'Se lo lasci vuoto si usa la data dell\'atto di assegnazione (o il 1° gennaio, se è precedente).' })}
         ${campo({ f: 'fine', label: 'Fino al', type: 'date', err: e.fine, hint: 'Lascia vuoto se l\'assegnazione prosegue fino al 31 dicembre.' })}
       </div>
       <div id="dyn4-gg"></div>
-      ${campo({ f: 'trattenuta', label: 'Importo trattenuto o pagato dal dipendente nell\'anno (€, Iva inclusa)', type: 'number', attrs: 'min="0" step="0.01" inputmode="decimal" placeholder="0,00"', err: e.trattenuta, hint: 'Se è previsto un canone o un prezzo per l\'uso privato, il reddito è la differenza tra valore forfetario e quanto versato (al lordo dell\'Iva). Se cambi anno d\'imposta nel parco auto l\'importo viene riproposto uguale: aggiornalo.' })}
+      ${campo({ f: 'trattenuta', label: 'Importo trattenuto o pagato dal dipendente nell\'anno (€, Iva inclusa)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="0,00"', err: e.trattenuta, hint: 'Se è previsto un canone o un prezzo per l\'uso privato, il reddito è la differenza tra valore forfetario e quanto versato (al lordo dell\'Iva). Se cambi anno d\'imposta nel parco auto l\'importo viene riproposto uguale: aggiornalo.' })}
       ${checkbox({ f: 'accessori', label: 'L\'auto ha accessori o allestimenti non valorizzati nelle tabelle ACI e non acquistati direttamente dal dipendente', hint: 'Dal 2026 il valore è maggiorato del 5% (solo nuovo regime). Es. optional montati dal concessionario non compresi nella versione ACI.', wrapId: 'w-acc' })}
       <div class="row2">
         ${campo({ f: 'dipendente', label: 'Dipendente (facoltativo)', attrs: 'autocomplete="off"' })}
@@ -250,7 +250,7 @@
   }
   function dyn4() {
     const d = S.d;
-    const gg = FB.giorniAssegnazione(S.anno, d.inizio, d.fine), ga = FB.giorniNellAnno(S.anno);
+    const gg = FB.giorniAssegnazione(S.anno, d.inizio || d.dataContratto, d.fine), ga = FB.giorniNellAnno(S.anno);
     $('#dyn4-gg').innerHTML = `<div class="note"><p>Giorni di assegnazione nel ${S.anno}: <b>${gg}</b> su ${ga}${gg === 0 ? ' — controlla le date: nessun giorno cade nell\'anno scelto.' : ''}</p></div>`;
     const reg = d.dataContratto ? FB.determinaRegime({ dataContratto: d.dataContratto, dataOrdine: d.dataOrdine }) : null;
     $('#w-acc').hidden = !(reg && reg.chiave === 'nuovo');

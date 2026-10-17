@@ -65,6 +65,15 @@
     altro: { nome: 'Altro (autocarro puro, mezzo > 3,5 t, più di 9 posti…)', aci: null, forfait: false },
   };
 
+  /** Numero da testo italiano o inglese: "0,5777", "0.5777", "1.234,56", "88,0". Vuoto → NaN. */
+  function num(x) {
+    if (typeof x === 'number') return x;
+    if (x == null) return NaN;
+    let s = String(x).trim().replace(/[\s€]/g, '');
+    if (!s) return NaN;
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    return Number(s);
+  }
   const r2 = (x) => Math.round(x * 100 + (x >= 0 ? 1e-7 : -1e-7)) / 100;
   const anno = (iso) => Number(String(iso).slice(0, 4));
   const bisestile = (a) => (a % 4 === 0 && a % 100 !== 0) || a % 400 === 0;
@@ -110,6 +119,9 @@
         motivo: 'Veicolo ordinato entro il 31.12.2024 e concesso nel 2025: resta il regime transitorio basato sulle emissioni di CO₂ (L. 207/2024, art. 1 c. 48-bis).',
       };
     }
+    if (inp.anno === 2025 && inp.dataImmatricolazione && inp.dataImmatricolazione < '2025-01-01') {
+      w.push('Per il periodo d\'imposta 2025 la norma richiedeva un veicolo "di nuova immatricolazione": per un\'auto già immatricolata prima del 2025 il calcolo è indicativo, verifica con il consulente. Dal 2026 il requisito è stato eliminato (D.Lgs. 148/2026).');
+    }
     return {
       chiave: 'nuovo', avvisi: w,
       motivo: 'Veicolo concesso dal 1.01.2025 (e non ordinato entro il 31.12.2024): si applica il nuovo regime, con percentuale legata al tipo di alimentazione (10% elettrico, 20% ibrido plug-in, 50% altri).',
@@ -119,16 +131,19 @@
   function percentualeRegime(chiave, R, inp) {
     if (chiave === 'pre2020') return { perc: R.pre2020.perc, nota: 'Percentuale fissa' };
     if (chiave === 'co2') {
-      const co2 = inp.alim === 'elettrico' && (inp.co2 === '' || inp.co2 == null) ? 0 : Number(inp.co2);
-      if (inp.co2 === '' || inp.co2 == null ? inp.alim !== 'elettrico' : Number.isNaN(co2)) {
+      const vuota = inp.co2 === '' || inp.co2 == null;
+      if (vuota && inp.alim !== 'elettrico') {
         return { errore: 'Per il regime CO₂ serve il valore delle emissioni (campo V.7 della carta di circolazione).' };
       }
+      const co2 = vuota ? 0 : num(inp.co2);
+      if (!(co2 >= 0)) return { errore: 'Il valore delle emissioni di CO₂ non è valido.' };
       const s = R.co2.soglie.find((x) => x.fino == null || co2 <= x.fino);
       return { perc: s.perc, nota: `CO₂ = ${co2} g/km` };
     }
     const n = R.nuovo;
     if (inp.alim === 'elettrico') return { perc: n.perc_elettrico, nota: 'Veicolo a batteria a trazione esclusivamente elettrica' };
     if (inp.alim === 'plugin') return { perc: n.perc_plugin, nota: 'Veicolo elettrico ibrido plug-in' };
+    if (inp.alim === 'idrogeno') return { perc: n.perc_altri, nota: 'Altri veicoli (le riduzioni valgono solo per elettrici a batteria e ibridi plug-in)' };
     return { perc: n.perc_altri, nota: 'Altri veicoli' };
   }
 
@@ -139,10 +154,14 @@
   function calcolaRegime(chiave, inp, regole) {
     const R = regoleAnno(regole, inp.anno);
     if (!R) return { errore: `Nessuna regola definita per l'anno d'imposta ${inp.anno}: aggiungila in "Aggiornamento annuale".` };
-    const ck = Number(inp.ck);
+    const ck = num(inp.ck);
     if (!(ck > 0)) return { errore: 'Manca il costo chilometrico ACI.' };
     const p = percentualeRegime(chiave, R, inp);
     if (p.errore) return { errore: p.errore };
+    const okNum = (v) => typeof v === 'number' && v >= 0;
+    if (!(R.km > 0) || !okNum(p.perc) || (R.anzianita.attiva && !(okNum(R.anzianita.anni) && okNum(R.anzianita.perc))) || (R.accessori.attiva && !okNum(R.accessori.perc))) {
+      return { errore: `Le regole fiscali dal ${R.dal} contengono un valore mancante o non valido: correggile in "Aggiornamento annuale".` };
+    }
 
     const passi = [];
     const base = r2(ck * R.km);
@@ -170,11 +189,12 @@
     const valoreAnnuo = valore;
 
     const ga = giorniNellAnno(inp.anno);
-    const gg = giorniAssegnazione(inp.anno, inp.inizio, inp.fine);
+    // Se l'inizio non è indicato si parte dall'atto di assegnazione (o dal 1° gennaio, se precedente)
+    const gg = giorniAssegnazione(inp.anno, inp.inizio || inp.dataContratto, inp.fine);
     const proRata = r2(valoreAnnuo * gg / ga);
     if (gg !== ga) passi.push({ etichetta: 'Ragguaglio ai giorni di assegnazione', dettaglio: `${gg} / ${ga} giorni`, valore: proRata });
 
-    const trattenuta = Math.max(0, Number(inp.trattenuta) || 0);
+    const trattenuta = Math.max(0, num(inp.trattenuta) || 0);
     const imponibile = Math.max(0, r2(proRata - trattenuta));
     if (trattenuta) passi.push({ etichetta: 'Meno: importo trattenuto al dipendente (Iva inclusa)', dettaglio: '', valore: -trattenuta });
 
@@ -194,7 +214,7 @@
     return { regime: reg, ...principale, confronto };
   }
 
-  const api = { DATE_REGIMI, REGOLE_DEFAULT, REGIMI, ALIMENTAZIONI, CATEGORIE, r2, anno, giorniNellAnno, giorniAssegnazione, regoleAnno, determinaRegime, calcolaRegime, calcola };
+  const api = { num, DATE_REGIMI, REGOLE_DEFAULT, REGIMI, ALIMENTAZIONI, CATEGORIE, r2, anno, giorniNellAnno, giorniAssegnazione, regoleAnno, determinaRegime, calcolaRegime, calcola };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FB = api;
 })(typeof window !== 'undefined' ? window : globalThis);
