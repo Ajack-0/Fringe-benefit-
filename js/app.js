@@ -265,6 +265,7 @@
         ${campo({ f: 'fine', label: 'Fino al', type: 'date', err: e.fine, hint: 'Lascia vuoto se l\'assegnazione prosegue fino al 31 dicembre.' })}
       </div>
       <div id="dyn4-gg"></div>
+      <div id="dyn4-prev"></div>
       <div id="w-normale" hidden>
         <div class="note warn"><p id="normale-txt"></p></div>
         ${campo({ f: 'canone', label: 'Canone annuo di leasing/noleggio, o costo annuo del veicolo (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 6.000,00"', err: e.canone, hint: 'Importo pagato dal datore di lavoro per l\'intero anno (verrà ragguagliato ai giorni di assegnazione).' })}
@@ -274,6 +275,7 @@
         </div>
       </div>
       ${campo({ f: 'trattenuta', label: 'Importo trattenuto o pagato dal dipendente nell\'anno (€, Iva inclusa)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="0,00"', err: e.trattenuta, hint: 'Se è previsto un canone o un prezzo per l\'uso privato, il reddito è la differenza tra valore forfetario e quanto versato (al lordo dell\'Iva). Se cambi anno d\'imposta nel parco auto l\'importo viene riproposto uguale: aggiornalo.' })}
+      <div id="acc-info"></div>
       ${checkbox({ f: 'accessori', label: 'L\'auto ha accessori o allestimenti non valorizzati nelle tabelle ACI e non acquistati direttamente dal dipendente', hint: 'Dal 2026 il valore è maggiorato del 5% (solo nuovo regime). Es. optional montati dal concessionario non compresi nella versione ACI.', wrapId: 'w-acc' })}
       <div class="row2">
         ${campo({ f: 'dipendente', label: 'Utilizzatore (facoltativo)', attrs: 'autocomplete="off"' })}
@@ -294,13 +296,30 @@
     const gg = FB.giorniAssegnazione(S.anno, d.inizio || d.dataContratto, d.fine), ga = FB.giorniNellAnno(S.anno);
     $('#dyn4-gg').innerHTML = `<div class="note"><p>Giorni di assegnazione nel ${S.anno}: <b>${gg}</b> su ${ga}${gg === 0 ? ' — controlla le date: nessun giorno cade nell\'anno scelto.' : ''}</p></div>`;
     const reg = regimeDi(d);
-    $('#w-acc').hidden = !(reg && reg.chiave === 'nuovo') || serveNormale(d) || aziendaleAmm(d);
+    const R = FB.regoleAnno(S.regole, S.anno);
+    const accAttivo = !!(R && R.accessori.attiva);
+    const nuovo = !!(reg && reg.chiave === 'nuovo') && !serveNormale(d) && !aziendaleAmm(d);
+    $('#w-acc').hidden = !(nuovo && accAttivo);
+    $('#acc-info').innerHTML = !reg || serveNormale(d) || aziendaleAmm(d) ? ''
+      : (!nuovo ? '<div class="note"><p>La maggiorazione del 5% per gli accessori non valorizzati riguarda solo il <b>nuovo regime</b> (assegnazioni dal 2025): per questa auto non si applica.</p></div>'
+        : (!accAttivo ? `<div class="note"><p>Per l'anno d'imposta ${S.anno} la maggiorazione del 5% per gli accessori <b>non è prevista</b> (vale dal 2026, D.Lgs. 148/2026): nessun effetto sul calcolo.</p></div>` : ''));
+    anteprima4();
     $('#w-normale').hidden = !serveNormale(d);
     $('#w-kmlav').hidden = personaleAmm(d);
     $('#w-addebito').hidden = isAmm(d);
     $('#normale-txt').innerHTML = personaleAmm(d)
       ? '<b>Uso esclusivamente personale:</b> il compenso in natura è il valore normale dell\'auto (art. 9 Tuir). Indica il costo annuo sostenuto dalla società per il veicolo.'
       : '<b>Veicolo usato assegnato quando la norma richiedeva la "nuova immatricolazione".</b> Per l\'Agenzia (Telefisco 2021) il benefit non è forfettario: si prende il canone di leasing/noleggio pagato dal datore di lavoro e si <b>scorpora l\'indennità chilometrica ACI</b> per i km percorsi nell\'interesse del datore di lavoro. Se non indichi i dati, l\'app mostra solo il forfait ACI come stima.';
+  }
+
+  /** Anteprima viva del calcolo, aggiornata a ogni modifica dei campi del passo 4. */
+  function anteprima4() {
+    const c = calcolaVeicolo(S.d, S.anno), r = c.res, box = $('#dyn4-prev');
+    if (!box) return;
+    if (r.errore) { box.innerHTML = `<div class="note warn"><p><b>Anteprima non disponibile:</b> ${esc(r.errore)}</p></div>`; return; }
+    const extra = r.maggiorazioni.length ? ` · maggiorazioni: ${r.maggiorazioni.map((m) => ({ anzianita: '+50% anzianità', accessori: '+5% accessori' }[m])).join(', ')}` : '';
+    box.innerHTML = `<div class="note ok"><p><b>Anteprima del calcolo</b> (${esc(REGIMI[r.regime.chiave].breve)}${r.perc != null ? ' ' + r.perc + '%' : ''}${extra})</p>
+      <p>Valore ${r.regime.chiave === 'normale' ? 'del benefit' : 'annuo pieno'}: <b>${eur(r.valoreAnnuo)}</b> · ragguagliato a ${r.giorni}/${r.giorniAnno} giorni: <b>${eur(r.proRata)}</b> · trattenuta: <b>${eur(r.trattenuta)}</b> → <b>imponibile ${eur(r.imponibile)}</b></p></div>`;
   }
 
   // ---------- risultato ----------

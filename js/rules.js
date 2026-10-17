@@ -73,7 +73,10 @@
     if (x == null) return NaN;
     let s = String(x).trim().replace(/[\s€]/g, '');
     if (!s) return NaN;
-    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    if (s.includes(',') && s.includes('.')) {
+      // entrambi presenti: l'ultimo è il separatore decimale ("1.234,56" oppure "1,234.56")
+      s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+    } else if (s.includes(',')) s = s.replace(',', '.');
     else if (/^[1-9]\d{0,2}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, ''); // "8.000" = ottomila (non 8)
     return Number(s);
   }

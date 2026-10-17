@@ -195,3 +195,7 @@ test('Numeri: il punto con tre cifre dopo è separatore delle migliaia, non deci
   assert.equal(FB.num('8.000'), 8000); assert.equal(FB.num('1.234.567'), 1234567); assert.equal(FB.num('12.500'), 12500);
   assert.equal(FB.num('0.577'), 0.577); assert.equal(FB.num('0.5777'), 0.5777); assert.equal(FB.num('88.0'), 88); assert.equal(FB.num('1234.5'), 1234.5);
 });
+
+test('Numeri: separatore decimale = ultimo tra punto e virgola', () => {
+  assert.equal(FB.num('1,000.50'), 1000.5); assert.equal(FB.num('1.000,50'), 1000.5); assert.equal(FB.num('12,5'), 12.5);
+});
