@@ -8,7 +8,8 @@ e nuovo regime dal 2025 / Omnibus 2026. Sito statico: apri `index.html` (meglio 
 ## Cosa copre
 - Fringe benefit per dipendenti, amministratori e co.co.co. (uso promiscuo, personale, aziendale).
 - Auto usata assegnata dopo il 2020: valore normale (canone meno indennità chilometrica ACI, Telefisco 2021).
-- Deducibilità di imposte dirette e Iva per targa, con importi se si indicano costi e Iva.
+- Passo "Costi e Iva" (facoltativo): fattura d'acquisto (Iva detraibile nell'anno, parte non detraibile nel costo e ammortamento automatico), canoni, altri costi, Iva a debito sul corrispettivo al dipendente.
+- Deducibilità di imposte dirette e Iva per targa, con limiti di costo.
 
 ## Aggiornamento annuale
 - **Tabelle ACI**: scheda *Aggiornamento annuale* → carica il PDF della Gazzetta Ufficiale

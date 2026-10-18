@@ -227,3 +227,48 @@ test('Amministratore con mezzo fuori forfait: uso aziendale = 0, uso personale =
 test('Auto ordinata entro il 2024 e concessa a settembre 2025: regime CO2 (testo vigente: tutto il 2025)', () => {
   assert.equal(FB.determinaRegime({ dataContratto: '2025-09-01', dataOrdine: '2024-11-20' }).chiave, 'co2');
 });
+
+// ---------- costi strutturati e Iva (acquisto, canoni, altri costi, Iva a debito) ----------
+const acq = { titolo: 'acquisto', prezzoAcquisto: '50.000', ivaAcquisto: '11.000', annoAcquisto: 2026 };
+
+test('Ebook p. 41: acquisto 50.000 + Iva 11.000 (40%), anno N: ammortamento 12,5% di 56.600 = 7.075 + costi 5.000 → 70% = 8.452,50', () => {
+  const d = FB.deducibilita({ ...acq, anno: 2026, altriCosti: 5000 }, fringe());
+  assert.equal(d.costi.costoVeicolo, 56600);
+  assert.equal(d.costi.quota, 7075);
+  assert.equal(d.imposte.importo, 8452.5);
+  assert.equal(d.iva.acquisto.detraibile, 4400); assert.equal(d.iva.acquisto.indetraibile, 6600);
+  assert.equal(d.iva.detraibile, 4400); // nell'anno d'acquisto si detrae l'Iva della fattura
+});
+
+test('Ebook p. 40: stessa auto, anno N+1, assegnata < metà anno → ammortamento 14.150 limitato a 4.519 → 903,80; Iva acquisto non più nell\'anno', () => {
+  const d = FB.deducibilita({ ...acq, anno: 2027 }, fringe(100));
+  assert.equal(d.costi.quota, 14150);
+  assert.equal(d.imposte.importo, 903.8);
+  assert.equal(d.iva.acquisto.nellAnno, false); assert.equal(d.iva.detraibile, null);
+});
+
+test('Ammortamento automatico: 12,5% · 25% · 25% · 25% · 12,5%, poi 0; la quota inserita a mano prevale', () => {
+  const q = (anno) => FB.componiCosti({ ...acq, anno }, 40).quota;
+  assert.deepEqual([2026, 2027, 2028, 2029, 2030, 2031].map(q), [7075, 14150, 14150, 14150, 7075, 0]);
+  assert.equal(FB.componiCosti({ ...acq, anno: 2027, quotaBene: '10.000' }, 40).quota, 10000);
+});
+
+test('Noleggio: Iva non detraibile sui canoni fa parte del canone soggetto al limite; altri costi pieni', () => {
+  const d = FB.deducibilita({ titolo: 'noleggio', quotaBene: 3000, ivaCanone: 660, altriCosti: 2000, ivaAltri: 440 }, fringe(100));
+  // canone lordo = 3000 + 60% di 660 = 3396 (sotto il limite 3.615,20); altri = 2000 + 264
+  assert.equal(d.costi.base, FB.r2(3396 + 2000 + 264));
+  assert.equal(d.imposte.importo, FB.r2((3396 + 2264) * 0.2));
+  assert.equal(d.iva.detraibile, FB.r2((660 + 440) * 0.4));
+});
+
+test('Ebook p. 49-50: corrispettivo addebitato 2.656,96 € Iva inclusa → imponibile 2.177,84 + Iva 22% 479,12; Iva detraibile 100%', () => {
+  const res = { imponibile: 0, giorni: 365, giorniAnno: 365, trattenuta: 2656.96, regola: R[1] };
+  const d = FB.deducibilita({ addebito: true, altriCosti: 1000, ivaAltri: 220 }, res);
+  assert.deepEqual(d.iva.debito, { aliquota: 22, totale: 2656.96, imponibile: 2177.84, iva: 479.12 });
+  assert.equal(d.iva.perc, 100); assert.equal(d.iva.detraibile, 220);
+});
+
+test('Corrispettivo senza trattenuta: avviso; amministratore: nessuna Iva a debito', () => {
+  assert.ok(FB.deducibilita({ addebito: true }, fringe()).note.some((n) => /trattenuta/.test(n)));
+  assert.equal(FB.deducibilita({ beneficiario: 'amministratore', usoAmm: 'promiscuo', addebito: true }, { ...fringe(), trattenuta: 100 }).iva.debito, null);
+});

@@ -27,6 +27,7 @@
       nuovo: { perc_altri: 50, perc_elettrico: 10, perc_plugin: 20 },
       anzianita: { attiva: false, anni: 5, perc: 50 },
       accessori: { attiva: false, perc: 5 },
+      aliquotaIva: 22,
     },
     {
       dal: 2026,
@@ -37,6 +38,7 @@
       nuovo: { perc_altri: 50, perc_elettrico: 10, perc_plugin: 20 },
       anzianita: { attiva: true, anni: 5, perc: 50 },
       accessori: { attiva: true, perc: 5 },
+      aliquotaIva: 22,
     },
   ];
 
@@ -256,90 +258,168 @@
   // Limiti di costo art. 164, c. 1, lett. b) Tuir (imprese e professionisti), ebook cap. 3.3
   const LIMITE_ACQUISTO = 18075.99;
   const LIMITE_NOLEGGIO = 3615.20;
-
-  /**
-   * Spese fiscalmente rilevanti dopo il limite di costo (solo dove la deduzione è al 20%).
-   * costiAnnui = tutti i costi dell'anno (imponibile), comprensivi di "quotaBene" (ammortamento o canone);
-   * l'Iva non detraibile sui costi è un costo e si aggiunge, ripartita in proporzione.
-   * Acquisto/leasing: quota × 18.075,99 / costo del veicolo (se superiore). Noleggio: canone fino a 3.615,20.
-   */
-  function speseRilevanti(inp, base, ivaIndetr) {
-    const costi = Math.max(0, num(inp.costiAnnui) || 0);
-    const quota = Math.max(0, num(inp.quotaBene) || 0);
-    const costoVeicolo = num(inp.costoVeicolo) || 0;
-    const t = inp.titolo || '';
-    if (!t || !quota) return { rilevanti: base, applicato: false, motivo: !t ? 'indica come l\'azienda ha l\'auto (acquisto, leasing o noleggio)' : 'indica la quota di ammortamento o il canone compreso nei costi' };
-    const quotaLorda = Math.min(quota, costi) + (costi ? ivaIndetr * Math.min(quota, costi) / costi : 0);
-    let quotaLim;
-    if (t === 'noleggio') quotaLim = Math.min(quotaLorda, LIMITE_NOLEGGIO);
-    else {
-      if (!(costoVeicolo > 0)) return { rilevanti: base, applicato: false, motivo: 'indica il costo del veicolo (comprensivo dell\'Iva non detraibile)' };
-      quotaLim = quotaLorda * Math.min(1, LIMITE_ACQUISTO / costoVeicolo);
-    }
-    return { rilevanti: r2(base - quotaLorda + quotaLim), applicato: true, quotaLorda: r2(quotaLorda), quotaLim: r2(quotaLim) };
-  }
+  // Ammortamento fiscale delle autovetture: 25% annuo, ridotto a metà nel primo anno (ebook p. 39-40)
+  const COEFF_AMMORTAMENTO = [12.5, 25, 25, 25, 12.5];
 
   const fmt = (n) => Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pos = (x) => Math.max(0, num(x) || 0);
+  const pieno = (x) => x !== '' && x != null;
 
   /**
-   * Deducibilità per l'azienda (imposte dirette e Iva) in base a utilizzatore, uso, titolo e periodo.
-   * Fonte: ebook "Fiscalità dei veicoli aziendali", cap. 3.1.2–3.1.4 e schema 3.3.
-   * res: risultato di calcola() (serve imponibile, giorni, giorniAnno).
+   * Percentuale di detrazione Iva (art. 19-bis1 DPR 633/72, schema ebook 3.3).
+   * 100% solo se al dipendente, che ha l'auto per la maggior parte del periodo, è addebitato un corrispettivo.
+   */
+  function percIva(inp, res) {
+    const amm = inp.beneficiario === 'amministratore';
+    const maggior = res && !res.errore ? res.giorni > res.giorniAnno / 2 : true;
+    if (!amm && maggior && inp.addebito) return { perc: 100, testo: 'Iva detraibile al 100%: al dipendente è addebitato uno specifico corrispettivo con fattura, quindi il veicolo si considera utilizzato esclusivamente nell\'impresa.' };
+    if (!amm && maggior) return { perc: 40, testo: 'Iva detraibile al 40% (veicolo in uso promiscuo). Sale al 100% se si addebita al dipendente un corrispettivo con fattura.' };
+    if (!amm && inp.addebito) return { perc: 40, testo: 'Iva detraibile al 40%: il 100% con corrispettivo vale solo se l\'auto è assegnata per la maggior parte del periodo d\'imposta.' };
+    if (amm && inp.usoAmm === 'personale') return { perc: 40, testo: 'Iva detraibile al 40% secondo la regola generale sui veicoli non strumentali (caso non trattato espressamente nell\'ebook: verifica).' };
+    return { perc: 40, testo: 'Iva detraibile al 40%.' };
+  }
+
+  /**
+   * Costi dell'anno e Iva, separati per natura:
+   * - acquisto: prezzo + Iva in fattura → Iva detraibile nell'anno d'acquisto; la parte non detraibile
+   *   entra nel costo fiscale del veicolo, che si ammortizza (12,5% / 25% / 25% / 25% / 12,5%);
+   * - leasing/noleggio: canone annuo + Iva sui canoni (la parte non detraibile è un costo dell'anno);
+   * - altri costi (carburante, manutenzione, assicurazione, bollo) + la loro Iva.
+   * Accetta anche il formato precedente (costiAnnui / quotaBene / ivaCosti) dei veicoli già salvati.
+   */
+  function componiCosti(inp, perc) {
+    let x = inp;
+    const strutturati = ['prezzoAcquisto', 'ivaAcquisto', 'ivaCanone', 'altriCosti', 'ivaAltri'].some((k) => pieno(inp[k]));
+    if (!strutturati && pos(inp.costiAnnui) > 0) {
+      const C = pos(inp.costiAnnui), Q = Math.min(pos(inp.quotaBene), C), V = pos(inp.ivaCosti);
+      const ivaQ = inp.titolo === 'acquisto' || !C ? 0 : V * Q / C;
+      x = { ...inp, quotaBene: Q || '', altriCosti: C - Q, ivaCanone: ivaQ, ivaAltri: V - ivaQ };
+    }
+    const quotaIva = (iva) => { const d = r2(iva * perc / 100); return { detr: d, indetr: r2(iva - d) }; };
+    const t = x.titolo || '';
+    let quota = 0, ivaQuota = 0, costoVeicolo = pos(x.costoVeicolo), acquisto = null, ammortamento = null;
+    if (t === 'acquisto') {
+      const prezzo = pos(x.prezzoAcquisto), ivaA = pos(x.ivaAcquisto);
+      const annoA = Number(x.annoAcquisto) || (x.dataImmatricolazione ? anno(x.dataImmatricolazione) : x.anno);
+      const qa = quotaIva(ivaA);
+      if (prezzo) costoVeicolo = r2(prezzo + qa.indetr);
+      if (prezzo || ivaA) acquisto = { prezzo, iva: ivaA, detraibile: qa.detr, indetraibile: qa.indetr, anno: annoA, nellAnno: annoA === x.anno };
+      const i = x.anno - annoA;
+      const coeff = i >= 0 && i < COEFF_AMMORTAMENTO.length ? COEFF_AMMORTAMENTO[i] : 0;
+      if (pieno(x.quotaBene)) { quota = pos(x.quotaBene); ammortamento = { manuale: true, coeff: null, anno: i + 1 }; }
+      else if (costoVeicolo) { quota = r2(costoVeicolo * coeff / 100); ammortamento = { manuale: false, coeff, anno: i + 1 }; }
+    } else {
+      quota = pos(x.quotaBene);
+      ivaQuota = pos(x.ivaCanone);
+    }
+    const qq = quotaIva(ivaQuota), altri = pos(x.altriCosti), ivaAltri = pos(x.ivaAltri), qo = quotaIva(ivaAltri);
+    const quotaLorda = r2(quota + qq.indetr);
+    const base = r2(quotaLorda + altri + qo.indetr);
+    return {
+      titolo: t, quota, ivaQuota, quotaLorda, altri, ivaAltri, base, costoVeicolo, acquisto, ammortamento,
+      ivaAnnua: r2(ivaQuota + ivaAltri), ivaAnnuaDetr: r2(qq.detr + qo.detr), ivaAnnuaIndetr: r2(qq.indetr + qo.indetr),
+      haCosti: base > 0, haIva: ivaQuota + ivaAltri > 0 || !!(acquisto && acquisto.iva),
+    };
+  }
+
+  /** Spese rilevanti dopo il limite di costo (si usa dove la deduzione è al 20%). */
+  function limiteCosto(cc) {
+    if (!cc.titolo) return { rilevanti: cc.base, applicato: false, motivo: 'indica se l\'auto è in acquisto, leasing o noleggio' };
+    if (!cc.quota) return { rilevanti: cc.base, applicato: false, motivo: cc.titolo === 'acquisto' ? 'indica il prezzo d\'acquisto o la quota di ammortamento' : 'indica il canone annuo' };
+    let lim;
+    if (cc.titolo === 'noleggio') lim = Math.min(cc.quotaLorda, LIMITE_NOLEGGIO);
+    else {
+      if (!(cc.costoVeicolo > 0)) return { rilevanti: cc.base, applicato: false, motivo: 'indica il costo del veicolo' };
+      lim = cc.quotaLorda * Math.min(1, LIMITE_ACQUISTO / cc.costoVeicolo);
+    }
+    return { rilevanti: r2(cc.base - cc.quotaLorda + lim), applicato: true, quotaLim: r2(lim) };
+  }
+
+  /**
+   * Deducibilità per l'azienda (imposte dirette e Iva) in base a utilizzatore, uso, possesso e periodo.
+   * Fonte: ebook "Fiscalità dei veicoli aziendali", cap. 3.1.2–3.1.4, schema 3.3, esempi p. 39-43 e 49-50.
+   * res: risultato di calcola() (servono imponibile, giorni, giorniAnno, trattenuta, regola).
    */
   function deducibilita(inp, res) {
-    const costi = Math.max(0, num(inp.costiAnnui) || 0);
-    const ivaCosti = Math.max(0, num(inp.ivaCosti) || 0);
     const amm = inp.beneficiario === 'amministratore';
-    const out = { caso: '', imposte: { perc: null, testo: '', importo: null }, iva: { perc: 40, testo: '', detraibile: null, indetraibile: null }, limiti: [], note: [] };
     const ben = res && !res.errore ? res.imponibile : 0;
     const maggior = res && !res.errore ? res.giorni > res.giorniAnno / 2 : true;
-
-    // Iva: prima, perché la parte non detraibile è un costo deducibile
-    if (!amm && maggior && inp.addebito) { out.iva.perc = 100; out.iva.testo = 'Iva integralmente detraibile: al dipendente è addebitato uno specifico corrispettivo con fattura (veicolo considerato utilizzato esclusivamente nell\'impresa).'; }
-    else if (!amm && maggior) out.iva.testo = 'Iva detraibile al 40% (art. 19-bis1 DPR 633/72); sale al 100% se si addebita al dipendente un corrispettivo con fattura.';
-    else if (amm && inp.usoAmm === 'personale') out.iva.testo = 'Iva detraibile al 40% secondo la regola generale sui veicoli non strumentali (caso non trattato espressamente nell\'ebook: verifica).';
-    else out.iva.testo = 'Iva detraibile al 40%.';
-    if (ivaCosti) {
-      out.iva.detraibile = r2(ivaCosti * out.iva.perc / 100);
-      out.iva.indetraibile = r2(ivaCosti - out.iva.detraibile);
-    }
-    const ivaIndetr = out.iva.indetraibile || 0;
-    const base = r2(costi + ivaIndetr); // costi + Iva non detraibile
-    const conLimite = (testo) => {
-      if (!costi) return { testo, rilevanti: 0 };
-      const sr = speseRilevanti(inp, base, ivaIndetr);
-      if (sr.applicato) {
-        if (sr.quotaLim < sr.quotaLorda) out.note.push(`Limite di costo applicato: la quota ${inp.titolo === 'noleggio' ? 'di noleggio' : 'di ammortamento/canone'} rileva per ${fmt(sr.quotaLim)} € invece di ${fmt(sr.quotaLorda)} €.`);
-      } else {
-        out.limiti.push(`Limite di costo non applicato (${sr.motivo}): l'importo deducibile mostrato è un massimo. Limiti: 18.075,99 € di costo del veicolo per acquisto/leasing, 3.615,20 € annui per il noleggio.`);
-      }
-      return { testo, rilevanti: sr.rilevanti };
+    const pi = percIva(inp, res);
+    const cc = componiCosti(inp, pi.perc);
+    const out = {
+      caso: '', costi: cc, dettaglio: [], limiti: [], note: [],
+      imposte: { perc: null, testo: '', importo: null },
+      iva: { perc: pi.perc, testo: pi.testo, annua: null, acquisto: null, debito: null, detraibile: null, indetraibile: null },
     };
-    if (ivaIndetr && costi) out.note.push(`L'Iva non detraibile (${fmt(ivaIndetr)} €) è un costo: è compresa nella base di deduzione.`);
 
+    // --- Iva
+    if (cc.ivaAnnua) out.iva.annua = { iva: cc.ivaAnnua, detraibile: cc.ivaAnnuaDetr, indetraibile: cc.ivaAnnuaIndetr };
+    if (cc.acquisto && cc.acquisto.iva) out.iva.acquisto = cc.acquisto;
+    const acqAnno = out.iva.acquisto && out.iva.acquisto.nellAnno ? out.iva.acquisto : null;
+    if (out.iva.annua || acqAnno) {
+      out.iva.detraibile = r2((out.iva.annua ? out.iva.annua.detraibile : 0) + (acqAnno ? acqAnno.detraibile : 0));
+      out.iva.indetraibile = r2((out.iva.annua ? out.iva.annua.indetraibile : 0) + (acqAnno ? acqAnno.indetraibile : 0));
+    }
+    if (!amm && inp.addebito) {
+      const tr = res && !res.errore ? res.trattenuta : 0;
+      const aliq = (res && res.regola && res.regola.aliquotaIva) || 22;
+      if (tr > 0) {
+        const imp = r2(tr / (1 + aliq / 100));
+        out.iva.debito = { aliquota: aliq, totale: tr, imponibile: imp, iva: r2(tr - imp) };
+      } else out.note.push('Hai indicato un corrispettivo addebitato al dipendente ma nessuna trattenuta: inserisci al passo 4 l\'importo pagato dal dipendente (Iva inclusa), su cui emettere fattura.');
+    }
+
+    // --- dettaglio dei costi che formano la base
+    if (cc.titolo === 'acquisto' && cc.quota) {
+      const a = cc.ammortamento;
+      cc.acquisto && cc.acquisto.prezzo && out.dettaglio.push({ voce: 'Costo fiscale del veicolo: prezzo + Iva non detraibile', importo: cc.costoVeicolo, info: true });
+      out.dettaglio.push({ voce: a && !a.manuale ? `Ammortamento dell'anno (${String(a.coeff).replace('.', ',')}%, ${a.anno}° anno)` : 'Ammortamento dell\'anno (inserito da te)', importo: cc.quota });
+    } else if (cc.quota) {
+      out.dettaglio.push({ voce: cc.titolo === 'noleggio' ? 'Canone di noleggio' : (cc.titolo === 'leasing' ? 'Canone di leasing' : 'Ammortamento o canone'), importo: cc.quota });
+      if (cc.quotaLorda > cc.quota) out.dettaglio.push({ voce: 'Iva non detraibile sui canoni', importo: r2(cc.quotaLorda - cc.quota) });
+    }
+    if (cc.titolo === 'acquisto' && !cc.quota && cc.ammortamento == null && cc.acquisto && !cc.acquisto.prezzo) out.note.push('Per l\'ammortamento indica il prezzo d\'acquisto (imponibile) o la quota dell\'anno.');
+    if (cc.altri) out.dettaglio.push({ voce: 'Altri costi (carburante, manutenzione, assicurazione, bollo…)', importo: cc.altri });
+    const indAltri = r2(cc.base - cc.quotaLorda - cc.altri);
+    if (indAltri > 0) out.dettaglio.push({ voce: 'Iva non detraibile sugli altri costi', importo: indAltri });
+    if (cc.base) out.dettaglio.push({ voce: 'Totale costi dell\'anno fiscalmente rilevanti', importo: cc.base, totale: true });
+
+    const conLimite = () => {
+      const l = limiteCosto(cc);
+      if (!cc.haCosti) return 0;
+      if (l.applicato) {
+        if (l.quotaLim < cc.quotaLorda) {
+          out.dettaglio.push({ voce: `Limite di costo: la quota ${cc.titolo === 'noleggio' ? 'di noleggio' : (cc.titolo === 'leasing' ? 'di leasing' : 'di ammortamento')} rileva per ${fmt(l.quotaLim)} € (${cc.titolo === 'noleggio' ? 'massimo 3.615,20 €' : 'costo del veicolo ridotto a 18.075,99 €'})`, importo: -r2(cc.quotaLorda - l.quotaLim) });
+          out.dettaglio.push({ voce: 'Costi rilevanti dopo il limite', importo: l.rilevanti, totale: true });
+        }
+      } else out.limiti.push(`Limite di costo non applicato (${l.motivo}): l'importo deducibile mostrato è un massimo. Limiti: 18.075,99 € di costo del veicolo per acquisto/leasing, 3.615,20 € annui per il noleggio.`);
+      return l.rilevanti;
+    };
+
+    // --- imposte dirette
     if (!amm) {
       if (maggior) {
         out.caso = 'Uso promiscuo al dipendente per la maggior parte del periodo d\'imposta';
-        out.imposte = { perc: 70, testo: '70% dei costi (art. 164, c. 1, lett. b-bis Tuir), senza limiti di costo e a prescindere dal fringe benefit', importo: costi ? r2(base * 0.7) : null };
+        out.imposte = { perc: 70, testo: '70% dei costi (art. 164, c. 1, lett. b-bis Tuir), senza limiti di costo e a prescindere dal fringe benefit', importo: cc.haCosti ? r2(cc.base * 0.7) : null };
       } else {
         out.caso = 'Auto assegnata per meno della metà del periodo d\'imposta';
-        const c = conLimite('20% dei costi con limite di costo (art. 164, c. 1, lett. b Tuir): non vale il 70% perché l\'assegnazione non copre la maggior parte del periodo');
-        out.imposte = { perc: 20, testo: c.testo, importo: costi ? r2(c.rilevanti * 0.2) : null };
+        const ril = conLimite();
+        out.imposte = { perc: 20, testo: '20% dei costi con limite di costo (art. 164, c. 1, lett. b Tuir): non vale il 70% perché l\'assegnazione non copre la maggior parte del periodo', importo: cc.haCosti ? r2(ril * 0.2) : null };
       }
     } else if (inp.usoAmm === 'personale') {
       out.caso = 'Amministratore / co.co.co. — uso esclusivamente personale';
-      out.imposte = { perc: null, testo: 'Deducibile il compenso in natura (art. 95, c. 5 Tuir), entro le spese sostenute: nessuna ulteriore deduzione', importo: costi ? r2(Math.min(ben, base)) : null };
+      out.imposte = { perc: null, testo: 'Deducibile il compenso in natura (art. 95, c. 5 Tuir), entro le spese sostenute: nessuna ulteriore deduzione', importo: cc.haCosti ? r2(Math.min(ben, cc.base)) : null };
     } else if (inp.usoAmm === 'aziendale') {
       out.caso = 'Amministratore / co.co.co. — uso esclusivamente aziendale';
-      const c = conLimite('20% dei costi con limite di costo (art. 164, c. 1, lett. b Tuir), se l\'uso è inerente all\'attività');
-      out.imposte = { perc: 20, testo: c.testo, importo: costi ? r2(c.rilevanti * 0.2) : null };
+      const ril = conLimite();
+      out.imposte = { perc: 20, testo: '20% dei costi con limite di costo (art. 164, c. 1, lett. b Tuir), se l\'uso è inerente all\'attività', importo: cc.haCosti ? r2(ril * 0.2) : null };
     } else {
       out.caso = 'Amministratore / co.co.co. — uso promiscuo';
-      const c = conLimite('Deducibile il compenso in natura erogato (art. 95, c. 5) più il 20% dell\'eccedenza delle spese rilevanti su tale compenso (art. 164, c. 1, lett. b), con limite di costo');
-      let imp = null, testo = c.testo;
-      if (costi) {
-        const compenso = Math.min(ben, base);
-        const ecc = Math.max(0, r2(c.rilevanti - ben));
+      const ril = conLimite();
+      let imp = null, testo = 'Deducibile il compenso in natura erogato (art. 95, c. 5) più il 20% dell\'eccedenza delle spese rilevanti su tale compenso (art. 164, c. 1, lett. b), con limite di costo';
+      if (cc.haCosti) {
+        const compenso = Math.min(ben, cc.base);
+        const ecc = Math.max(0, r2(ril - ben));
         imp = r2(compenso + ecc * 0.2);
         testo += `: ${fmt(compenso)} + 20% × ${fmt(ecc)}`;
       }
@@ -389,7 +469,7 @@
     return { regime: reg, ...principale, confronto: lista };
   }
 
-  const api = { speseRilevanti, calcolaNormale, deducibilita, num, DATE_REGIMI, REGOLE_DEFAULT, REGIMI, ALIMENTAZIONI, CATEGORIE, r2, anno, giorniNellAnno, giorniAssegnazione, regoleAnno, determinaRegime, calcolaRegime, calcola };
+  const api = { componiCosti, limiteCosto, percIva, COEFF_AMMORTAMENTO, calcolaNormale, deducibilita, num, DATE_REGIMI, REGOLE_DEFAULT, REGIMI, ALIMENTAZIONI, CATEGORIE, r2, anno, giorniNellAnno, giorniAssegnazione, regoleAnno, determinaRegime, calcolaRegime, calcola };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FB = api;
 })(typeof window !== 'undefined' ? window : globalThis);

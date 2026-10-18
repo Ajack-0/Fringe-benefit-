@@ -31,19 +31,32 @@
   const getPath = (o, p) => p.split('.').reduce((x, k) => (x == null ? x : x[k]), o);
   const setPath = (o, p, v) => { const ks = p.split('.'); const l = ks.pop(); ks.reduce((x, k) => x[k], o)[l] = v; };
 
+  /** Porta i costi del formato precedente (un solo totale) nei campi separati del passo "Costi e Iva". */
+  function migraCosti(d) {
+    const legacy = FB.num(d.costiAnnui) > 0 && !['prezzoAcquisto', 'ivaAcquisto', 'canoneAnnuo', 'ivaCanone', 'altriCosti', 'ivaAltri', 'ammManuale'].some((k) => d[k] !== '' && d[k] != null);
+    if (!legacy) return d;
+    const C = FB.num(d.costiAnnui), Q = Math.min(FB.num(d.quotaBene) || 0, C), V = FB.num(d.ivaCosti) || 0;
+    const ivaQ = d.titolo === 'acquisto' || !C ? 0 : FB.r2(V * Q / C);
+    const out = { ...d, altriCosti: String(FB.r2(C - Q)), ivaAltri: V ? String(FB.r2(V - ivaQ)) : '', costiAnnui: '', ivaCosti: '', quotaBene: '' };
+    if (Q) { if (d.titolo === 'acquisto') out.ammManuale = String(Q); else { out.canoneAnnuo = String(Q); out.ivaCanone = ivaQ ? String(ivaQ) : ''; } }
+    return out;
+  }
+
   // ---------- stato ----------
   const nuoviDati = () => ({
     targa: '', marca: '', modello: '', dataImm: '', categoria: 'autovettura', alim: '', co2: '', cc: '', kw: '', posti: '',
     dataContratto: '', dataOrdine: '', aciKey: '', aciLabel: '', ck: '', ckManuale: false,
     inizio: '', fine: '', trattenuta: '', accessori: false, dipendente: '', azienda: '',
     beneficiario: 'dipendente', usoAmm: 'promiscuo', canone: '', kmLavoro: '', tariffaKm: '',
-    titolo: '', addebito: false, costiAnnui: '', ivaCosti: '', quotaBene: '', costoVeicolo: '',
+    titolo: '', addebito: false, costoVeicolo: '',
+    prezzoAcquisto: '', ivaAcquisto: '', annoAcquisto: '', ammManuale: '', canoneAnnuo: '', ivaCanone: '', altriCosti: '', ivaAltri: '',
+    costiAnnui: '', ivaCosti: '', quotaBene: '', // formato precedente (veicoli salvati prima della versione con passo "Costi e Iva")
   });
   const S = {
     tab: 'calcolo', anno: null,
     regole: unisciRegole(LS.get('fb.regole', null)),
     flotta: LS.get('fb.flotta', []),
-    step: 1, d: { ...nuoviDati(), ...LS.get('fb.bozza', {}) }, editId: null,
+    step: 1, d: migraCosti({ ...nuoviDati(), ...LS.get('fb.bozza', {}) }), editId: null,
     q: '', qChiave: null, qSolo: true, qProd: true,
     aci: { anno: null, q: '', alim: '', prod: false },
     regSel: null, imp: null,
@@ -85,7 +98,10 @@
       anno, dataImmatricolazione: d.dataImm, dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, alim: d.alim,
       categoria: d.categoria, co2: d.co2, ck, inizio: d.inizio, fine: d.fine, trattenuta: d.trattenuta, accessori: d.accessori,
       beneficiario: d.beneficiario, usoAmm: isAmm(d) ? d.usoAmm : '', canone: d.canone, kmLavoro: d.kmLavoro, tariffaKm: d.tariffaKm,
-      titolo: d.titolo, addebito: d.addebito, costiAnnui: d.costiAnnui, ivaCosti: d.ivaCosti, quotaBene: d.quotaBene, costoVeicolo: d.costoVeicolo,
+      titolo: d.titolo, addebito: d.addebito, costoVeicolo: d.titolo === 'leasing' ? d.costoVeicolo : '',
+      prezzoAcquisto: d.prezzoAcquisto, ivaAcquisto: d.ivaAcquisto, annoAcquisto: d.annoAcquisto, ivaCanone: d.titolo === 'acquisto' ? '' : d.ivaCanone,
+      quotaBene: d.titolo === 'acquisto' ? d.ammManuale : d.canoneAnnuo, altriCosti: d.altriCosti, ivaAltri: d.ivaAltri,
+      costiAnnui: d.costiAnnui, ivaCosti: d.ivaCosti,
     };
     return { inp, riga, mancante, ck, res: FB.calcola(inp, S.regole) };
   }
@@ -138,8 +154,12 @@
       if (d.inizio && d.fine && d.inizio > d.fine) e.fine = 'La data di fine è precedente all\'inizio.';
       if (d.trattenuta !== '' && !(FB.num(d.trattenuta) >= 0)) e.trattenuta = 'Importo non valido.';
       if (personaleAmm(d) && !(FB.num(d.canone) > 0)) e.canone = 'Per l\'uso personale indica il costo annuo del veicolo (valore normale).';
-      for (const f of ['canone', 'kmLavoro', 'tariffaKm', 'costiAnnui', 'ivaCosti', 'quotaBene', 'costoVeicolo']) if (d[f] !== '' && !e[f] && !(FB.num(d[f], f !== 'tariffaKm') >= 0)) e[f] = 'Importo non valido.';
-      if (!e.quotaBene && FB.num(d.quotaBene) > FB.num(d.costiAnnui)) e.quotaBene = 'La quota non può superare i costi annui totali.';
+      for (const f of ['canone', 'kmLavoro', 'tariffaKm']) if (d[f] !== '' && !e[f] && !(FB.num(d[f], f !== 'tariffaKm') >= 0)) e[f] = 'Importo non valido.';
+    }
+    if (step === 5) {
+      for (const f of ['prezzoAcquisto', 'ivaAcquisto', 'ammManuale', 'canoneAnnuo', 'ivaCanone', 'costoVeicolo', 'altriCosti', 'ivaAltri']) if (d[f] !== '' && !(FB.num(d[f]) >= 0)) e[f] = 'Importo non valido: scrivi solo il numero, es. 1.250,00.';
+      if (d.annoAcquisto !== '' && !(Number(d.annoAcquisto) >= 1990 && Number(d.annoAcquisto) <= S.anno + 1)) e.annoAcquisto = 'Anno non valido.';
+      if (FB.num(d.ivaAcquisto) > FB.num(d.prezzoAcquisto) * 0.3) e.ivaAcquisto = 'L\'Iva sembra troppo alta rispetto al prezzo: inserisci il prezzo senza Iva e l\'Iva a parte.';
     }
     return e;
   }
@@ -156,7 +176,7 @@
   }
 
   // ---------- CALCOLO GUIDATO ----------
-  const PASSI = [['Veicolo', 'dal libretto'], ['Assegnazione', 'utilizzatore e date'], ['Modello ACI', 'costo al km'], ['Periodo', 'trattenute e costi'], ['Risultato', 'e confronto']];
+  const PASSI = [['Veicolo', 'dal libretto'], ['Assegnazione', 'utilizzatore e date'], ['Modello ACI', 'costo al km'], ['Periodo', 'e trattenute'], ['Costi e Iva', 'facoltativo'], ['Risultato', 'e confronto']];
 
   function renderCalcolo(errs = {}) {
     const root = $('#tab-calcolo');
@@ -164,9 +184,9 @@
       const n = i + 1, cls = n === S.step ? 'on' : (n < S.step ? 'done' : '');
       return `<button class="step ${cls}" data-go="${n}" ${n > S.step && !puoAndare(n) ? 'disabled' : ''}><small>Passo ${n}</small><b>${t}</b>${s}</button>`;
     }).join('')}</div>`;
-    const corpo = [null, passo1, passo2, passo3, passo4, passo5][S.step](errs);
+    const corpo = [null, passo1, passo2, passo3, passo4, passoCosti, passo5][S.step](errs);
     root.innerHTML = stepsHtml + corpo;
-    ({ 1: dyn1, 2: dyn2, 3: dyn3, 4: dyn4 }[S.step] || (() => {}))();
+    ({ 1: dyn1, 2: dyn2, 3: dyn3, 4: dyn4, 5: dyn5 }[S.step] || (() => {}))();
   }
 
   const navBtns = (avanti = 'Avanti →', extra = '') => `<div class="actions"><div>${S.step > 1 ? '<button class="btn ghost" data-nav="-1">← Indietro</button>' : ''}</div><div class="r">${extra}<button class="btn" data-nav="1">${avanti}</button></div></div>`;
@@ -276,7 +296,7 @@
   }
 
   function passo4(e) {
-    return `<div class="card"><h2>4. Periodo di assegnazione e trattenute</h2>
+    return `<div class="card"><h2>4. Periodo di assegnazione, trattenute e accessori</h2>
       <div class="need"><b>Cosa ci serve:</b> per quanti giorni dell'anno ${S.anno} l'auto è stata assegnata (il valore va ragguagliato ai giorni, a prescindere dall'uso effettivo) e
         se il dipendente paga qualcosa per l'uso privato (trattenuta in busta paga o canone), perché va sottratto dal valore tassabile.</div>
       <div class="row2">
@@ -300,19 +320,7 @@
         ${campo({ f: 'dipendente', label: 'Utilizzatore (facoltativo)', attrs: 'autocomplete="off"' })}
         ${campo({ f: 'azienda', label: 'Azienda (facoltativo)', attrs: 'autocomplete="off"' })}
       </div>
-      <h3 style="margin-top:18px">Per la deducibilità (facoltativo)</h3>
-      <p class="muted">Servono per mostrarti, per questa targa, la deducibilità dei costi e dell'Iva e gli importi in euro.</p>
-      ${campo({ f: 'titolo', label: 'Come l\'azienda ha l\'auto', opts: [['', '— non so / non indicato —'], ['acquisto', 'Acquisto'], ['leasing', 'Leasing'], ['noleggio', 'Noleggio']], hint: 'Serve ad applicare il limite di costo quando la deducibilità è del 20% (anche per gli amministratori).' })}
-      <div class="row2">
-        ${campo({ f: 'costiAnnui', label: 'Costi annui del veicolo per l\'azienda (€, Iva esclusa)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 8.500,00"', err: e.costiAnnui, hint: 'Ammortamento o canone, assicurazione, bollo, carburante, manutenzione. Per l\'acquisto, l\'ammortamento si calcola sul costo comprensivo dell\'Iva non detraibile.' })}
-        ${campo({ f: 'ivaCosti', label: 'Iva sui costi annui (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 1.870,00"', err: e.ivaCosti, hint: 'Iva sui costi dell\'anno (canoni, carburante, manutenzione). La parte non detraibile diventa costo deducibile.' })}
-      </div>
-      <div class="row2">
-        ${campo({ f: 'quotaBene', label: 'di cui ammortamento o canone (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 4.500,00"', err: e.quotaBene, hint: 'La parte dei costi annui a cui si applica il limite di costo.' })}
-        ${campo({ f: 'costoVeicolo', label: 'Costo del veicolo (€, con Iva non detraibile)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 56.600,00"', err: e.costoVeicolo, wrapId: 'w-costoveicolo', hint: 'Solo acquisto o leasing: se supera 18.075,99 € la quota si riduce in proporzione.' })}
-      </div>
-      ${checkbox({ f: 'addebito', label: 'Al dipendente è addebitato un corrispettivo con fattura per l\'uso privato', hint: 'In questo caso l\'Iva sull\'auto è detraibile al 100%.', wrapId: 'w-addebito' })}
-      ${navBtns('Calcola →')}</div>`;
+      ${navBtns()}</div>`;
   }
   function dyn4() {
     const d = S.d;
@@ -329,8 +337,6 @@
     anteprima4();
     $('#w-normale').hidden = !serveNormale(d);
     $('#w-kmlav').hidden = personaleAmm(d);
-    $('#w-addebito').hidden = isAmm(d);
-    $('#w-costoveicolo').hidden = d.titolo === 'noleggio';
     $('#normale-txt').innerHTML = personaleAmm(d)
       ? '<b>Uso esclusivamente personale:</b> il compenso in natura è il valore normale dell\'auto (art. 9 Tuir). Indica il costo annuo sostenuto dalla società per il veicolo.'
       : '<b>Veicolo usato assegnato quando la norma richiedeva la "nuova immatricolazione".</b> Per l\'Agenzia (Telefisco 2021) il benefit non è forfettario: si prende il canone di leasing/noleggio pagato dal datore di lavoro e si <b>scorpora l\'indennità chilometrica ACI</b> per i km percorsi nell\'interesse del datore di lavoro. Se non indichi i dati, l\'app mostra solo il forfait ACI come stima.';
@@ -346,12 +352,87 @@
       <p>Valore ${r.regime.chiave === 'normale' ? 'del benefit' : 'annuo pieno'}: <b>${eur(r.valoreAnnuo)}</b> · ragguagliato a ${r.giorni}/${r.giorniAnno} giorni: <b>${eur(r.proRata)}</b> · trattenuta: <b>${eur(r.trattenuta)}</b> → <b>imponibile ${eur(r.imponibile)}</b></p></div>`;
   }
 
+  // ---------- passo 5: costi e Iva ----------
+  function passoCosti(e) {
+    const d = S.d;
+    const annoDef = d.dataImm ? FB.anno(d.dataImm) : S.anno;
+    return `<div class="card"><h2>5. Costi dell'auto e Iva <small class="muted">(facoltativo)</small></h2>
+      <div class="need"><b>A cosa serve:</b> calcolare, per questa targa, quanto l'azienda può <b>dedurre</b> (imposte dirette) e <b>detrarre</b> (Iva). Il fringe benefit del ${isAmm(d) ? 'beneficiario' : 'dipendente'} non cambia: se non ti serve, premi <b>Salta</b>.
+        <ul><li>Scrivi gli importi <b>senza Iva</b> (imponibile) e l'<b>Iva a parte</b>, nel campo accanto: la divisione tra detraibile e non detraibile la facciamo noi.</li>
+        <li>Indica i costi <b>dell'anno ${S.anno}</b> (es. i 12 canoni dell'anno, il carburante dell'anno), non i totali del contratto.</li>
+        <li>Assicurazione e bollo non hanno Iva: mettili negli altri costi e lascia l'Iva com'è.</li></ul></div>
+      <div id="iva-spiega"></div>
+      ${campo({ f: 'titolo', label: 'Come l\'azienda ha l\'auto', opts: [['', '— non indicato —'], ['acquisto', 'Acquisto (di proprietà)'], ['leasing', 'Leasing'], ['noleggio', 'Noleggio a lungo termine']] })}
+      <div id="b-acq" hidden>
+        <h3>A. Fattura d'acquisto</h3>
+        <div class="row2">
+          ${campo({ f: 'prezzoAcquisto', label: 'Prezzo d\'acquisto senza Iva (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 30.000,00"', err: e.prezzoAcquisto, hint: 'L\'imponibile della fattura del concessionario.' })}
+          ${campo({ f: 'ivaAcquisto', label: 'Iva della fattura d\'acquisto (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 6.600,00"', err: e.ivaAcquisto, hint: 'Si detrae nell\'anno d\'acquisto; la parte non detraibile si aggiunge al costo dell\'auto.' })}
+        </div>
+        <div class="row2">
+          ${campo({ f: 'annoAcquisto', label: 'Anno d\'acquisto', attrs: `inputmode="numeric" autocomplete="off" placeholder="${annoDef}"`, err: e.annoAcquisto, hint: `Se vuoto usiamo l'anno di immatricolazione (${annoDef}).` })}
+          ${campo({ f: 'ammManuale', label: `Ammortamento ${S.anno} (€) — facoltativo`, attrs: 'inputmode="decimal" autocomplete="off" placeholder="lo calcoliamo noi"', err: e.ammManuale, hint: 'Lascialo vuoto: lo calcoliamo al 25% (12,5% nel primo anno). Compilalo solo se a bilancio hai una quota diversa.' })}
+        </div>
+        <div id="acq-info"></div>
+      </div>
+      <div id="b-can" hidden>
+        <h3 id="b-can-tit">A. Canoni dell'anno</h3>
+        <div class="row2">
+          ${campo({ f: 'canoneAnnuo', label: `Canoni del ${S.anno} senza Iva (€)`, attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 6.000,00"', err: e.canoneAnnuo, hint: 'Somma dei canoni di competenza dell\'anno (imponibile).' })}
+          ${campo({ f: 'ivaCanone', label: 'Iva sui canoni (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 1.320,00"', err: e.ivaCanone, hint: 'L\'Iva delle fatture dei canoni dell\'anno.' })}
+        </div>
+        ${campo({ f: 'costoVeicolo', label: 'Costo del veicolo indicato nel contratto di leasing (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 35.000,00"', err: e.costoVeicolo, wrapId: 'w-costoveicolo', hint: 'Serve per il limite di 18.075,99 €: se il costo è superiore, i canoni sono deducibili in proporzione.' })}
+      </div>
+      <h3 id="b-altri-tit">B. Altri costi dell'anno</h3>
+      <div class="row2">
+        ${campo({ f: 'altriCosti', label: `Altri costi del ${S.anno} senza Iva (€)`, attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 3.500,00"', err: e.altriCosti, hint: 'Carburante, manutenzione, pneumatici, assicurazione, bollo, pedaggi…' })}
+        ${campo({ f: 'ivaAltri', label: 'Iva sugli altri costi (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 600,00"', err: e.ivaAltri, hint: 'Solo l\'Iva effettivamente in fattura (assicurazione e bollo ne sono esenti).' })}
+      </div>
+      <div id="w-addebito">
+        <h3>C. Corrispettivo al dipendente</h3>
+        ${checkbox({ f: 'addebito', label: 'Al dipendente è addebitato un corrispettivo con fattura per l\'uso privato', hint: 'Il corrispettivo è l\'importo indicato al passo 4 come trattenuta (Iva inclusa): su di esso l\'azienda emette fattura con Iva. In cambio, se l\'auto è assegnata per più di metà anno, l\'Iva sull\'auto diventa detraibile al 100%.' })}
+      </div>
+      <div id="dyn5-prev"></div>
+      <div class="actions"><div><button class="btn ghost" data-nav="-1">← Indietro</button></div><div class="r"><button class="btn ghost" data-skip="1">Salta</button><button class="btn" data-nav="1">Calcola →</button></div></div></div>`;
+  }
+
+  function dyn5() {
+    const d = S.d, c = calcolaVeicolo(d, S.anno);
+    const t = d.titolo;
+    $('#b-acq').hidden = t !== 'acquisto';
+    $('#b-can').hidden = !(t === 'leasing' || t === 'noleggio');
+    $('#b-can-tit').textContent = t === 'noleggio' ? 'A. Canoni di noleggio dell\'anno' : 'A. Canoni di leasing dell\'anno';
+    $('#w-costoveicolo').hidden = t !== 'leasing';
+    $('#b-altri-tit').textContent = t ? 'B. Altri costi dell\'anno' : 'Costi dell\'anno';
+    $('#w-addebito').hidden = isAmm(d);
+    if (c.res.errore) { $('#iva-spiega').innerHTML = ''; $('#dyn5-prev').innerHTML = `<div class="note warn"><p>Completa prima i passi precedenti: ${esc(c.res.errore)}</p></div>`; return; }
+    const dd = FB.deducibilita(c.inp, c.res), cc = dd.costi, p = dd.iva.perc;
+    // spiegazione in parole semplici, aggiornata alle scelte fatte
+    const righe = [
+      `<li><b>Percentuale di detrazione:</b> ${esc(dd.iva.testo)}</li>`,
+      t === 'acquisto' ? `<li><b>Iva della fattura d'acquisto:</b> il ${p}% si recupera tutto nell'anno d'acquisto; il resto non si recupera, si aggiunge al prezzo e forma il <b>costo dell'auto</b>, che si deduce poco per volta con l'ammortamento.</li>` : '',
+      t === 'leasing' || t === 'noleggio' ? `<li><b>Iva sui canoni:</b> il ${p}% si recupera nell'anno; il resto diventa un costo e si somma ai canoni.</li>` : '',
+      `<li><b>Iva sugli altri costi:</b> il ${p}% si recupera nell'anno; il resto si somma ai costi.</li>`,
+      `<li><b>Imposte dirette:</b> ${esc(dd.imposte.perc != null ? `deducibile il ${dd.imposte.perc}% del totale dei costi così ottenuto` : dd.imposte.testo.split(':')[0])}${dd.imposte.perc === 20 || dd.imposte.perc == null && isAmm(d) && d.usoAmm !== 'personale' ? ', con i limiti di costo (18.075,99 € sul costo dell\'auto in acquisto/leasing, 3.615,20 € annui per il noleggio)' : ''}.</li>`,
+      !isAmm(d) && d.addebito ? `<li><b>Iva a debito:</b> dalla trattenuta del dipendente (Iva inclusa) scorporiamo l'Iva al ${(c.res.regola && c.res.regola.aliquotaIva) || 22}% da indicare in fattura e versare.</li>` : '',
+    ].join('');
+    $('#iva-spiega').innerHTML = `<div class="note"><p><b>Come calcoliamo l'Iva e i costi per questa auto</b> (${esc(dd.caso.toLowerCase())})</p><ul style="margin:6px 0 0;padding-left:20px">${righe}</ul></div>`;
+    // informazioni sull'acquisto
+    if (t === 'acquisto') {
+      const a = cc.acquisto, am = cc.ammortamento;
+      $('#acq-info').innerHTML = cc.costoVeicolo ? `<div class="note ok"><p>Costo dell'auto ai fini fiscali: <b>${eur(cc.costoVeicolo)}</b>${a && a.indetraibile ? ` (prezzo ${eur(a.prezzo)} + Iva non detraibile ${eur(a.indetraibile)})` : ''}.
+        ${am && !am.manuale ? (am.coeff ? `Ammortamento ${S.anno} (${am.anno}° anno, ${String(am.coeff).replace('.', ',')}%): <b>${eur(cc.quota)}</b>.` : `Nel ${S.anno} l'auto risulta già ammortizzata (o non ancora acquistata): ammortamento 0.`) : ''}
+        ${a && a.iva ? (a.nellAnno ? `Iva detraibile nel ${S.anno}: <b>${eur(a.detraibile)}</b>.` : `L'Iva della fattura si detrae nel ${a.anno}, non nel ${S.anno}.`) : ''}</p></div>` : '';
+    }
+    $('#dyn5-prev').innerHTML = `<h3 style="margin-top:16px">Anteprima</h3>${deducibilitaHtml(dd)}`;
+  }
+
   // ---------- risultato ----------
   function passo5() {
     const c = calcolaVeicolo(S.d, S.anno), r = c.res;
     const nome = esc(nomeVeicolo(S.d));
     if (r.errore) {
-      return `<div class="card"><h2>5. Risultato</h2><div class="note bad"><p><b>Non è possibile calcolare:</b> ${esc(r.errore)}</p></div>
+      return `<div class="card"><h2>6. Risultato</h2><div class="note bad"><p><b>Non è possibile calcolare:</b> ${esc(r.errore)}</p></div>
         <div class="actions"><button class="btn ghost" data-nav="-1">← Indietro</button><div class="r"><button class="btn ghost" data-go="1">Rivedi i dati del libretto</button></div></div></div>`;
     }
     const mensile = r2(r.imponibile / 12);
@@ -363,7 +444,7 @@
         <td class="num">${x.perc != null ? x.perc + '%' : '—'}</td><td class="num">${eur(x.imponibile)}</td>
         <td class="num">${x.applicabile ? '—' : `<span class="delta ${dlt > 0 ? 'up' : 'down'}">${dlt > 0 ? '+' : ''}${eur(dlt)}</span>`}</td></tr>`;
     }).join('');
-    return `<div class="card" id="risultato"><h2>5. Risultato — ${nome}</h2>
+    return `<div class="card" id="risultato"><h2>6. Risultato — ${nome}</h2>
       <p class="muted">${esc(S.d.dipendente ? `Dipendente: ${S.d.dipendente} · ` : '')}${esc(S.d.azienda ? `${S.d.azienda} · ` : '')}Anno d'imposta ${S.anno} · Tabelle ACI ${S.anno}</p>
       ${c.mancante ? `<div class="note warn"><p>Il modello scelto non è nella tabella ${S.anno}: è stato usato l'ultimo costo km salvato (${n4(c.ck)}). Riseleziona il modello al passo 3.</p></div>` : ''}
       <div class="kpis">
@@ -388,18 +469,37 @@
       <div class="r"><button class="btn ghost" data-act="stampa">Stampa / PDF</button><button class="btn ghost" data-act="nuovo">Nuovo calcolo</button><button class="btn" data-act="salva">${salvaTxt}</button></div></div>`;
   }
 
+  /** Tabelle costi / imposte / Iva della deducibilità (usate nel passo 5 e nel risultato). */
+  function deducibilitaHtml(dd) {
+    const riga = (v, imp, cls = '') => `<tr class="${cls}"><td>${v}</td><td class="num">${imp}</td></tr>`;
+    const costi = dd.dettaglio.length ? `<table><tbody>${dd.dettaglio.map((x) => riga(esc(x.voce), eur(x.importo), x.totale ? 'hl' : (x.info ? 'dim' : ''))).join('')}</tbody></table>` : '';
+    const iva = [];
+    if (dd.iva.annua) iva.push(`<tr><td>Iva su canoni e altri costi del ${S.anno}</td><td class="num">${eur(dd.iva.annua.iva)}</td><td class="num">${eur(dd.iva.annua.detraibile)}</td><td class="num">${eur(dd.iva.annua.indetraibile)}</td></tr>`);
+    if (dd.iva.acquisto) {
+      const a = dd.iva.acquisto;
+      iva.push(a.nellAnno ? `<tr><td>Iva sulla fattura d'acquisto (${a.anno})<br><small>la parte non detraibile è già nel costo dell'auto</small></td><td class="num">${eur(a.iva)}</td><td class="num">${eur(a.detraibile)}</td><td class="num">${eur(a.indetraibile)}</td></tr>`
+        : `<tr class="dim"><td>Iva sulla fattura d'acquisto: detratta nel ${a.anno}, non in questo anno</td><td class="num">${eur(a.iva)}</td><td class="num">—</td><td class="num">—</td></tr>`);
+    }
+    const debito = dd.iva.debito ? `<div class="note"><p><b>Fattura al dipendente per l'uso privato</b> (Iva a debito): imponibile <b>${eur(dd.iva.debito.imponibile)}</b> + Iva ${dd.iva.debito.aliquota}% <b>${eur(dd.iva.debito.iva)}</b> = ${eur(dd.iva.debito.totale)} (la trattenuta del passo 4).</p></div>` : '';
+    return `<p class="muted">${esc(dd.caso)}</p>
+      ${costi ? `<div class="scroll"><h3>Costi fiscalmente rilevanti</h3>${costi}</div>` : ''}
+      <div class="scroll"><table><thead><tr><th>Imposte dirette</th><th class="num">Deducibile</th></tr></thead><tbody>
+        <tr><td>${dd.imposte.perc != null ? `<span class="pill">${dd.imposte.perc}%</span> ` : '<span class="pill gray">regola mista</span> '}${esc(dd.imposte.testo)}</td><td class="num">${dd.imposte.importo != null ? `<b>${eur(dd.imposte.importo)}</b>` : '—'}</td></tr></tbody></table></div>
+      <div class="scroll"><table><thead><tr><th>Iva <span class="pill">${dd.iva.perc}% detraibile</span></th><th class="num">Iva</th><th class="num">Detraibile</th><th class="num">Non detraibile</th></tr></thead><tbody>
+        ${iva.join('') || '<tr><td colspan="4"><small>Nessuna Iva indicata.</small></td></tr>'}
+        ${dd.iva.detraibile != null && iva.length > 1 ? `<tr class="hl"><td>Totale ${S.anno}</td><td></td><td class="num">${eur(dd.iva.detraibile)}</td><td class="num">${eur(dd.iva.indetraibile)}</td></tr>` : ''}</tbody></table>
+        <p><small>${esc(dd.iva.testo)}</small></p></div>
+      ${debito}
+      ${dd.limiti.map((l) => `<div class="note warn"><p>${esc(l)}</p></div>`).join('')}
+      ${dd.note.map((l) => `<div class="note"><p>${esc(l)}</p></div>`).join('')}`;
+  }
+
   function deducibilitaCard(inp, r) {
     const dd = FB.deducibilita(inp, r);
-    const haCosti = dd.imposte.importo != null;
-    return `<div class="card"><h3>Deducibilità per l'azienda</h3>
-      <p class="muted">${esc(dd.caso)}</p>
-      <div class="scroll"><table><thead><tr><th></th><th>Regola</th><th class="num">Importo</th></tr></thead><tbody>
-        <tr><td><b>Imposte dirette</b><br>${dd.imposte.perc != null ? `<span class="pill">${dd.imposte.perc}%</span>` : '<span class="pill gray">regola mista</span>'}</td><td>${esc(dd.imposte.testo)}</td><td class="num">${haCosti ? `<b>${eur(dd.imposte.importo)}</b><br><small>deducibili</small>` : '—'}</td></tr>
-        <tr><td><b>Iva</b><br><span class="pill">${dd.iva.perc}%</span></td><td>${esc(dd.iva.testo)}</td><td class="num">${dd.iva.detraibile != null ? `<b>${eur(dd.iva.detraibile)}</b><br><small>detraibile</small><br>${eur(dd.iva.indetraibile)}<br><small>indetraibile</small>` : '—'}</td></tr>
-      </tbody></table></div>
-      ${dd.limiti.map((l) => `<div class="note warn"><p>${esc(l)}</p></div>`).join('')}
-      ${dd.note.map((l) => `<div class="note"><p>${esc(l)}</p></div>`).join('')}
-      ${haCosti || dd.iva.detraibile != null ? '' : '<p><small>Per vedere gli importi in euro inserisci i costi annui e l\'Iva al passo 4.</small></p>'}
+    const vuoto = !dd.costi.haCosti && !dd.costi.haIva;
+    return `<div class="card"><h3>Deducibilità e Iva per l'azienda</h3>
+      ${deducibilitaHtml(dd)}
+      ${vuoto ? '<p><small>Per vedere gli importi in euro compila il passo 5 "Costi e Iva".</small> <button class="btn ghost sm noprint" data-go="5">Vai al passo 5</button></p>' : ''}
     </div>`;
   }
 
@@ -408,13 +508,14 @@
   function avanti() {
     const e = valida(S.step);
     if (Object.keys(e).length) { renderCalcolo(e); const el = $('.f.err input, .f.err select') || $('.errmsg'); if (el) el.scrollIntoView({ block: 'center' }); return; }
-    if (S.step === 1 && CATEGORIE[S.d.categoria] && !CATEGORIE[S.d.categoria].forfait) { vai(5); return; }
-    vai(Math.min(5, S.step + 1));
+    if (S.step === 1 && CATEGORIE[S.d.categoria] && !CATEGORIE[S.d.categoria].forfait && !(isAmm(S.d))) { vai(6); return; }
+    vai(Math.min(6, S.step + 1));
   }
   $('#tab-calcolo').addEventListener('click', (ev) => {
     const t = ev.target.closest('button'); if (!t) return;
     if (t.dataset.go) vai(Number(t.dataset.go));
     else if (t.dataset.nav) (Number(t.dataset.nav) > 0 ? avanti() : vai(Math.max(1, S.step - 1)));
+    else if (t.dataset.skip) vai(6);
     else if (t.dataset.aci) {
       const r = ACI.perChiave(S.anno, t.dataset.aci);
       if (r) { Object.assign(S.d, { aciKey: t.dataset.aci, aciLabel: `${r.marca} ${r.modello}`, ck: r.ck, ckManuale: false }); salvaBozza(); dyn3(); }
@@ -431,7 +532,7 @@
     S.d[f] = t.type === 'checkbox' ? t.checked : t.value;
     if (f === 'ckManuale' && t.checked) S.d.aciKey = '';
     salvaBozza();
-    ({ 1: dyn1, 2: dyn2, 3: dyn3, 4: dyn4 }[S.step] || (() => {}))();
+    ({ 1: dyn1, 2: dyn2, 3: dyn3, 4: dyn4, 5: dyn5 }[S.step] || (() => {}))();
   });
   $('#tab-calcolo').addEventListener('focusin', (ev) => { if (ev.target.dataset && ev.target.dataset.f) evidenzia(ev.target.dataset.f); });
 
@@ -485,33 +586,34 @@
 
   /** Tabella riepilogativa: deducibilità di imposte dirette e Iva per ogni targa del parco auto. */
   function deducibilitaFlotta() {
-    let totCosti = 0, totDed = 0, totIvaD = 0, totIvaI = 0, haImporti = false;
+    let totCosti = 0, totDed = 0, totIvaD = 0, totIvaI = 0, totIvaDeb = 0, haImporti = false;
     const righe = S.flotta.map((rec) => {
       const c = calcolaVeicolo(rec.d, S.anno), d = rec.d;
       const nome = `<b>${esc(d.targa || nomeVeicolo(d))}</b>${d.targa ? `<br><small>${esc([d.marca, d.modello].filter(Boolean).join(' '))}</small>` : ''}`;
-      if (c.res.errore) return `<tr><td>${nome}</td><td colspan="7"><span class="pill warn">da completare</span> <small>${esc(c.res.errore)}</small></td></tr>`;
+      if (c.res.errore) return `<tr><td>${nome}</td><td colspan="8"><span class="pill warn">da completare</span> <small>${esc(c.res.errore)}</small></td></tr>`;
       const dd = FB.deducibilita(c.inp, c.res);
-      const costi = FB.num(d.costiAnnui) || 0;
+      const costi = dd.costi.base;
       if (dd.imposte.importo != null) { totCosti += costi; totDed += dd.imposte.importo; haImporti = true; }
       if (dd.iva.detraibile != null) { totIvaD += dd.iva.detraibile; totIvaI += dd.iva.indetraibile; }
+      if (dd.iva.debito) totIvaDeb += dd.iva.debito.iva;
       const chi = isAmm(d) ? `Amministratore/co.co.co.<br><small>${{ promiscuo: 'uso promiscuo', personale: 'uso personale', aziendale: 'uso aziendale' }[d.usoAmm]}</small>` : `Dipendente${d.dipendente ? `<br><small>${esc(d.dipendente)}</small>` : ''}`;
       return `<tr><td>${nome}</td><td>${chi}</td>
         <td>${dd.imposte.perc != null ? `<span class="pill">${dd.imposte.perc}%</span>` : '<span class="pill gray">compenso + 20%</span>'}</td>
         <td class="num">${costi ? eur(costi) : '—'}</td><td class="num">${dd.imposte.importo != null ? `<b>${eur(dd.imposte.importo)}</b>` : '—'}</td>
-        <td><span class="pill">${dd.iva.perc}%</span></td><td class="num">${dd.iva.detraibile != null ? eur(dd.iva.detraibile) : '—'}</td><td class="num">${dd.iva.indetraibile != null ? eur(dd.iva.indetraibile) : '—'}</td></tr>`;
+        <td><span class="pill">${dd.iva.perc}%</span></td><td class="num">${dd.iva.detraibile != null ? eur(dd.iva.detraibile) : '—'}${dd.iva.acquisto && dd.iva.acquisto.nellAnno ? `<br><small>di cui acquisto ${eur(dd.iva.acquisto.detraibile)}</small>` : ''}</td><td class="num">${dd.iva.indetraibile != null ? eur(dd.iva.indetraibile) : '—'}</td><td class="num">${dd.iva.debito ? eur(dd.iva.debito.iva) : '—'}</td></tr>`;
     }).join('');
     return `<div class="card"><h2>Deducibilità per targa — ${S.anno}</h2>
-      <p class="muted">Calcolata in base a utilizzatore, uso, giorni di assegnazione e ai costi che hai indicato al passo 4 di ogni auto. La percentuale c'è sempre; gli importi compaiono se hai inserito costi e Iva.</p>
-      <div class="scroll"><table><thead><tr><th>Targa</th><th>Utilizzatore</th><th>Imposte dirette</th><th class="num">Costi annui</th><th class="num">Costi deducibili</th><th>Iva</th><th class="num">Iva detraibile</th><th class="num">Iva indetraibile</th></tr></thead>
+      <p class="muted">Calcolata in base a utilizzatore, uso, giorni di assegnazione e ai costi indicati al passo 5 "Costi e Iva" di ogni auto. La percentuale c'è sempre; gli importi compaiono se hai inserito costi e Iva.</p>
+      <div class="scroll"><table><thead><tr><th>Targa</th><th>Utilizzatore</th><th>Imposte dirette</th><th class="num">Costi rilevanti</th><th class="num">Costi deducibili</th><th>Iva</th><th class="num">Iva detraibile</th><th class="num">Iva non detraibile</th><th class="num">Iva a debito</th></tr></thead>
         <tbody>${righe}</tbody>
-        <tfoot><tr><td colspan="3">Totale</td><td class="num">${haImporti ? eur(totCosti) : '—'}</td><td class="num">${haImporti ? eur(totDed) : '—'}</td><td></td><td class="num">${totIvaD || totIvaI ? eur(r2(totIvaD)) : '—'}</td><td class="num">${totIvaD || totIvaI ? eur(r2(totIvaI)) : '—'}</td></tr></tfoot></table></div>
+        <tfoot><tr><td colspan="3">Totale</td><td class="num">${haImporti ? eur(totCosti) : '—'}</td><td class="num">${haImporti ? eur(totDed) : '—'}</td><td></td><td class="num">${totIvaD || totIvaI ? eur(r2(totIvaD)) : '—'}</td><td class="num">${totIvaD || totIvaI ? eur(r2(totIvaI)) : '—'}</td><td class="num">${totIvaDeb ? eur(r2(totIvaDeb)) : '—'}</td></tr></tfoot></table></div>
       <p><small>Dipendenti: 70% se l'auto è assegnata per più di metà anno (altrimenti 20% con limiti di costo), Iva 40% (100% con corrispettivo addebitato). Amministratori: compenso in natura + 20% dell'eccedenza (promiscuo), solo il compenso (personale), 20% (aziendale); Iva 40%.</small></p></div>`;
   }
   $('#tab-flotta').addEventListener('click', (ev) => {
     const lnk = ev.target.closest('[data-tab-link]'); if (lnk) { ev.preventDefault(); if (lnk.dataset.tabLink === 'calcolo') { S.editId = null; S.d = nuoviDati(); S.step = 1; S.qChiave = null; } setTab(lnk.dataset.tabLink); return; }
     const t = ev.target.closest('button[data-fl]'); if (!t) return;
     const a = t.dataset.fl;
-    if (a === 'edit') { const rec = S.flotta.find((x) => x.id === t.dataset.id); S.d = { ...nuoviDati(), ...clone(rec.d) }; S.editId = rec.id; S.qChiave = null; S.step = 5; setTab('calcolo'); }
+    if (a === 'edit') { const rec = S.flotta.find((x) => x.id === t.dataset.id); S.d = migraCosti({ ...nuoviDati(), ...clone(rec.d) }); S.editId = rec.id; S.qChiave = null; S.step = 6; setTab('calcolo'); }
     else if (a === 'del') { if (confirm('Eliminare questo veicolo dal parco auto?')) { S.flotta = S.flotta.filter((x) => x.id !== t.dataset.id); salvaFlotta(); renderFlotta(); } }
     else if (a === 'csv') esportaCsvFlotta();
     else if (a === 'backup') scarica(`parco-auto-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ versione: 1, flotta: S.flotta }, null, 2), 'application/json');
@@ -519,7 +621,7 @@
       const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json';
       inp.onchange = async () => {
         try { const j = JSON.parse(await inp.files[0].text()); if (!Array.isArray(j.flotta)) throw new Error('formato');
-          S.flotta = j.flotta.map((x) => ({ id: x.id || uid(), d: { ...nuoviDati(), ...x.d } })); salvaFlotta(); renderFlotta(); toast(`${S.flotta.length} veicoli ripristinati`);
+          S.flotta = j.flotta.map((x) => ({ id: x.id || uid(), d: migraCosti({ ...nuoviDati(), ...x.d }) })); salvaFlotta(); renderFlotta(); toast(`${S.flotta.length} veicoli ripristinati`);
         } catch (e) { toast('File di backup non valido'); }
       };
       inp.click();
@@ -527,15 +629,15 @@
   });
   function esportaCsvFlotta() {
     const num = (n) => String(n).replace('.', ',');
-    const head = ['Targa', 'Marca', 'Modello', 'Dipendente', 'Prima immatricolazione', 'Data contratto', 'Disciplina', 'Percentuale', 'Costo km ACI', 'Fringe annuo pieno', 'Giorni', `Imponibile ${S.anno}`, 'Imponibile con nuovo regime', 'Tipo utilizzatore', 'Imposte dirette %', 'Costi annui', 'Costi deducibili', 'Iva detraibile %', 'Iva detraibile', 'Iva indetraibile'];
+    const head = ['Targa', 'Marca', 'Modello', 'Dipendente', 'Prima immatricolazione', 'Data contratto', 'Disciplina', 'Percentuale', 'Costo km ACI', 'Fringe annuo pieno', 'Giorni', `Imponibile ${S.anno}`, 'Imponibile con nuovo regime', 'Tipo utilizzatore', 'Imposte dirette %', 'Costi rilevanti', 'Costi deducibili', 'Iva detraibile %', 'Iva detraibile', 'Iva non detraibile', 'Iva a debito (fattura dipendente)'];
     const rows = S.flotta.map((rec) => {
       const c = calcolaVeicolo(rec.d, S.anno), r = c.res, d = rec.d;
       if (r.errore) return [d.targa, d.marca, d.modello, d.dipendente, d.dataImm, d.dataContratto, 'DA COMPLETARE: ' + r.errore];
       const nu = r.confronto.find((x) => x.chiave === 'nuovo');
       const dd = FB.deducibilita(c.inp, r);
       return [d.targa, d.marca, d.modello, d.dipendente, d.dataImm, d.dataContratto, REGIMI[r.regime.chiave].nome, r.perc ?? '', num(c.ck), num(r.valoreAnnuo.toFixed(2)), r.giorni, num(r.imponibile.toFixed(2)), nu && !nu.errore ? num(nu.imponibile.toFixed(2)) : '',
-        isAmm(d) ? `Amministratore (${d.usoAmm})` : 'Dipendente', dd.imposte.perc ?? 'compenso + 20% eccedenza', d.costiAnnui ? num(FB.num(d.costiAnnui).toFixed(2)) : '', dd.imposte.importo != null ? num(dd.imposte.importo.toFixed(2)) : '',
-        dd.iva.perc, dd.iva.detraibile != null ? num(dd.iva.detraibile.toFixed(2)) : '', dd.iva.indetraibile != null ? num(dd.iva.indetraibile.toFixed(2)) : ''];
+        isAmm(d) ? `Amministratore (${d.usoAmm})` : 'Dipendente', dd.imposte.perc ?? 'compenso + 20% eccedenza', dd.costi.base ? num(dd.costi.base.toFixed(2)) : '', dd.imposte.importo != null ? num(dd.imposte.importo.toFixed(2)) : '',
+        dd.iva.perc, dd.iva.detraibile != null ? num(dd.iva.detraibile.toFixed(2)) : '', dd.iva.indetraibile != null ? num(dd.iva.indetraibile.toFixed(2)) : '', dd.iva.debito ? num(dd.iva.debito.iva.toFixed(2)) : ''];
     });
     scarica(`fringe-benefit-${S.anno}.csv`, '﻿' + [head, ...rows].map((l) => l.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\n'), 'text/csv');
   }
@@ -570,6 +672,15 @@
       <p>Il regime CO₂ riguarda i veicoli di <b>nuova immatricolazione</b> (dal 1.07.2020). Per un'auto immatricolata prima di quella data e assegnata dopo, secondo l'Agenzia (Telefisco 2021, risoluzione 46/2020) il benefit si valorizza al <b>valore normale</b>:
         canone di leasing o noleggio pagato dal datore di lavoro, <b>meno</b> l'indennità chilometrica ACI per i chilometri percorsi nell'interesse del datore di lavoro (dentro e fuori dal Comune della sede), <b>meno</b> quanto trattiene il dipendente.
         L'app lo calcola quando inserisci canone e chilometri; lo stesso vale per un'auto usata assegnata nel 2025.</p></div>
+    <div class="card"><h2>Come l'app calcola l'Iva e i costi deducibili</h2>
+      <p>Al passo 5 gli importi si inseriscono <b>senza Iva</b>, con l'<b>Iva a parte</b>: la divisione tra detraibile e non detraibile la fa l'app.</p>
+      <div class="scroll"><table><thead><tr><th>Voce</th><th>Iva</th><th>Costo per le imposte dirette</th></tr></thead><tbody>
+        <tr><td><b>Fattura d'acquisto</b></td><td>Detraibile (40%, o 100% con corrispettivo al dipendente) <b>tutta nell'anno d'acquisto</b></td><td>Prezzo + Iva non detraibile = costo dell'auto, dedotto con l'ammortamento (12,5% il primo anno, poi 25%)</td></tr>
+        <tr><td><b>Canoni di leasing o noleggio</b></td><td>Detraibile nell'anno, stessa percentuale</td><td>Canoni + Iva non detraibile, con il limite di costo quando la deduzione è al 20%</td></tr>
+        <tr><td><b>Altri costi</b> (carburante, manutenzione, assicurazione, bollo)</td><td>Detraibile nell'anno, stessa percentuale</td><td>Costi + Iva non detraibile, senza limiti</td></tr>
+        <tr><td><b>Corrispettivo al dipendente</b></td><td>Iva <b>a debito</b>: si scorpora dalla trattenuta (Iva inclusa) e va in fattura</td><td>—</td></tr>
+      </tbody></table></div>
+      <p><small>Percentuali di deduzione: 70% per l'auto assegnata al dipendente per più di metà anno (senza limiti); 20% con limiti di costo negli altri casi; per gli amministratori compenso in natura + 20% dell'eccedenza. Fonte: ebook cap. 3.1–3.3, esempi p. 39–43 e 49–50.</small></p></div>
     <div class="card"><h2>Checklist per aggiornare la tassazione</h2><ol>
       <li><b>Censisci le auto assegnate</b>: per ognuna serve data di prima immatricolazione (B), alimentazione (P.3), CO₂ (V.7) e data dell'atto di assegnazione (e dell'ordine se concessa nel 2025).</li>
       <li><b>Individua la disciplina</b> di ciascuna auto: l'app lo fa dalle date, spiegandoti il perché.</li>
@@ -676,6 +787,8 @@
       <div class="row2">${num('anzianita.anni', 'Dopo il 31.12 del … anno successivo all\'immatricolazione')}${num('anzianita.perc', 'Maggiorazione %')}</div>
       ${chk('accessori.attiva', 'Maggiorazione per accessori non valorizzati (solo nuovo regime)')}
       <div class="row2">${num('accessori.perc', 'Maggiorazione %')}<span></span></div>
+      <h3>Iva</h3>
+      <div class="row2">${num('aliquotaIva', 'Aliquota Iva sul corrispettivo addebitato al dipendente (%)')}<span></span></div>
       <div class="actions"><div class="r"><button class="btn ghost" data-ag="regexp">Esporta regole (JSON)</button><button class="btn danger" data-ag="regreset">Ripristina predefinite</button></div>
         <div class="r">${S.regole.length > 1 ? '<button class="btn danger" data-ag="regdel">Elimina questa versione</button>' : ''}</div></div>`;
   }
