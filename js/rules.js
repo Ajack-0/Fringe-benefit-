@@ -255,10 +255,10 @@
     return { chiave: 'normale', perc: null, nota: 'Valore normale', base: q, valoreAnnuo: valore, giorni: gg, giorniAnno: ga, proRata: valore, trattenuta, imponibile, maggiorazioni: [], passi, regola: R };
   }
 
-  // Limiti di costo art. 164, c. 1, lett. b) Tuir (imprese e professionisti), ebook cap. 3.3
+  // Limiti di costo art. 164, c. 1, lett. b) Tuir (imprese e professionisti)
   const LIMITE_ACQUISTO = 18075.99;
   const LIMITE_NOLEGGIO = 3615.20;
-  // Ammortamento fiscale delle autovetture: 25% annuo, ridotto a metà nel primo anno (ebook p. 39-40)
+  // Ammortamento fiscale delle autovetture: 25% annuo, ridotto a metà nel primo anno
   const COEFF_AMMORTAMENTO = [12.5, 25, 25, 25, 12.5];
 
   const fmt = (n) => Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -266,7 +266,7 @@
   const pieno = (x) => x !== '' && x != null;
 
   /**
-   * Percentuale di detrazione Iva (art. 19-bis1 DPR 633/72, schema ebook 3.3).
+   * Percentuale di detrazione Iva (art. 19-bis1 DPR 633/72).
    * 100% solo se al dipendente, che ha l'auto per la maggior parte del periodo, è addebitato un corrispettivo.
    */
   function percIva(inp, res) {
@@ -275,7 +275,7 @@
     if (!amm && maggior && inp.addebito) return { perc: 100, testo: 'Iva detraibile al 100%: al dipendente è addebitato uno specifico corrispettivo con fattura, quindi il veicolo si considera utilizzato esclusivamente nell\'impresa.' };
     if (!amm && maggior) return { perc: 40, testo: 'Iva detraibile al 40% (veicolo in uso promiscuo). Sale al 100% se si addebita al dipendente un corrispettivo con fattura.' };
     if (!amm && inp.addebito) return { perc: 40, testo: 'Iva detraibile al 40%: il 100% con corrispettivo vale solo se l\'auto è assegnata per la maggior parte del periodo d\'imposta.' };
-    if (amm && inp.usoAmm === 'personale') return { perc: 40, testo: 'Iva detraibile al 40% secondo la regola generale sui veicoli non strumentali (caso non trattato espressamente nell\'ebook: verifica).' };
+    if (amm && inp.usoAmm === 'personale') return { perc: 40, testo: 'Iva detraibile al 40% secondo la regola generale sui veicoli non strumentali (caso non disciplinato espressamente: verifica).' };
     return { perc: 40, testo: 'Iva detraibile al 40%.' };
   }
 
@@ -337,7 +337,7 @@
 
   /**
    * Deducibilità per l'azienda (imposte dirette e Iva) in base a utilizzatore, uso, possesso e periodo.
-   * Fonte: ebook "Fiscalità dei veicoli aziendali", cap. 3.1.2–3.1.4, schema 3.3, esempi p. 39-43 e 49-50.
+   * Riferimenti: art. 164, art. 95 c. 5 Tuir; art. 19-bis1 DPR 633/72.
    * res: risultato di calcola() (servono imponibile, giorni, giorniAnno, trattenuta, regola).
    */
   function deducibilita(inp, res) {

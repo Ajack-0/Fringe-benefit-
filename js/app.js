@@ -680,7 +680,7 @@
         <tr><td><b>Altri costi</b> (carburante, manutenzione, assicurazione, bollo)</td><td>Detraibile nell'anno, stessa percentuale</td><td>Costi + Iva non detraibile, senza limiti</td></tr>
         <tr><td><b>Corrispettivo al dipendente</b></td><td>Iva <b>a debito</b>: si scorpora dalla trattenuta (Iva inclusa) e va in fattura</td><td>—</td></tr>
       </tbody></table></div>
-      <p><small>Percentuali di deduzione: 70% per l'auto assegnata al dipendente per più di metà anno (senza limiti); 20% con limiti di costo negli altri casi; per gli amministratori compenso in natura + 20% dell'eccedenza. Fonte: ebook cap. 3.1–3.3, esempi p. 39–43 e 49–50.</small></p></div>
+      <p><small>Percentuali di deduzione: 70% per l'auto assegnata al dipendente per più di metà anno (senza limiti); 20% con limiti di costo negli altri casi; per gli amministratori compenso in natura + 20% dell'eccedenza. Riferimenti: art. 164 e art. 95, c. 5 Tuir; art. 19-bis1 DPR 633/72.</small></p></div>
     <div class="card"><h2>Checklist per aggiornare la tassazione</h2><ol>
       <li><b>Censisci le auto assegnate</b>: per ognuna serve data di prima immatricolazione (B), alimentazione (P.3), CO₂ (V.7) e data dell'atto di assegnazione (e dell'ordine se concessa nel 2025).</li>
       <li><b>Individua la disciplina</b> di ciascuna auto: l'app lo fa dalle date, spiegandoti il perché.</li>
@@ -700,7 +700,7 @@
         <tr><td><b>S.1</b></td><td>Posti a sedere</td><td>Il forfait vale fino a 9 posti</td></tr>
         <tr><td><b>V.7</b></td><td>Emissioni CO₂ (g/km)</td><td>Percentuale nel regime CO₂ (assegnazioni 07/2020–12/2024)</td></tr>
       </tbody></table></div></div>
-    <p class="muted">Fonte: "Fiscalità dei veicoli aziendali" (Centro Studi Castelli – Sistema Ratio, aggiornato al 2.10.2026) e tabelle ACI pubblicate in G.U. n. 297 del 23.12.2025, S.O. n. 40.</p>`;
+    <p class="muted">Riferimenti normativi: art. 51, c. 4, lett. a) Tuir; L. 207/2024, art. 1, cc. 48 e 48-bis; D.Lgs. 148/2026; tabelle ACI pubblicate in G.U. n. 297 del 23.12.2025, S.O. n. 40.</p>`;
   }
 
   // ---------- TABELLE ACI ----------

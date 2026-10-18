@@ -5,7 +5,7 @@ const FB = createRequire(import.meta.url)('../js/rules.js');
 const R = FB.REGOLE_DEFAULT;
 const base = { anno: 2026, alim: 'benzina', categoria: 'autovettura', inizio: '', fine: '', trattenuta: 0, accessori: false };
 
-test('BEV assegnata nel 2025: 0,4421 × 15.000 × 10% = 663,15 (ebook p.56)', () => {
+test('BEV assegnata nel 2025: 0,4421 × 15.000 × 10% = 663,15', () => {
   const r = FB.calcolaRegime('nuovo', { ...base, anno: 2025, alim: 'elettrico', ck: 0.4421, dataImmatricolazione: '2025-01-10' }, R);
   assert.equal(r.valoreAnnuo, 663.15);
 });
@@ -15,7 +15,7 @@ test('Stelvio 2026 al 60%: 8.316,00 come nella tabella ACI', () => {
   assert.equal(r.perc, 60); assert.equal(r.valoreAnnuo, 8316);
 });
 
-test('Esempio ebook p.61: 0,5063 al 30% = 2.278,35; dal 2026 +50% = 3.417,53 (veicolo 2020)', () => {
+test('Esempio: 0,5063 al 30% = 2.278,35; dal 2026 +50% = 3.417,53 (veicolo 2020)', () => {
   const inp = { ...base, ck: 0.5063, co2: 120, dataImmatricolazione: '2020-09-15', dataContratto: '2020-12-01' };
   assert.equal(FB.calcolaRegime('co2', { ...inp, anno: 2025 }, R).valoreAnnuo, 2278.35);
   const r26 = FB.calcolaRegime('co2', inp, R);
@@ -171,12 +171,12 @@ const fringe = (giorni = 365, imponibile = 5000) => ({ imponibile, giorni, giorn
 test('Dipendente, maggior parte dell\'anno: 70% di costi + Iva non detraibile, Iva 40% (100% con corrispettivo)', () => {
   const d = FB.deducibilita({ costiAnnui: '10.000,00', ivaCosti: 2200 }, fringe());
   assert.equal(d.iva.perc, 40); assert.equal(d.iva.detraibile, 880); assert.equal(d.iva.indetraibile, 1320);
-  assert.equal(d.imposte.perc, 70); assert.equal(d.imposte.importo, FB.r2((10000 + 1320) * 0.7)); // l'Iva indetraibile è un costo (ebook p. 41)
+  assert.equal(d.imposte.perc, 70); assert.equal(d.imposte.importo, FB.r2((10000 + 1320) * 0.7)); // l'Iva indetraibile è un costo
   const c = FB.deducibilita({ costiAnnui: 1000, ivaCosti: 220, addebito: true }, fringe());
   assert.equal(c.iva.detraibile, 220); assert.equal(c.imposte.importo, 700);
 });
 
-test('Ebook p. 40: auto acquistata a 56.600 € (Iva indetraibile compresa), ammortamento 14.150 → quota deducibile 20% = 903,80', () => {
+test('Auto acquistata a 56.600 € (Iva indetraibile compresa), ammortamento 14.150 → quota deducibile 20% = 903,80', () => {
   const d = FB.deducibilita({ costiAnnui: 14150, quotaBene: 14150, titolo: 'acquisto', costoVeicolo: 56600 }, fringe(100));
   assert.equal(d.imposte.perc, 20); assert.equal(d.imposte.importo, 903.8);
   assert.equal(d.limiti.length, 0);
@@ -189,7 +189,7 @@ test('Noleggio assegnato per meno di metà anno: canone limitato a 3.615,20, alt
   assert.equal(senza.imposte.importo, 2000); assert.match(senza.limiti[0], /non applicato/);
 });
 
-test('Amministratore uso promiscuo: esempio ebook p. 43 → spese 20.000 (ammortamento 12.500 su auto da 50.000) → 10.000 + 20% × 2.019 = 10.403,80', () => {
+test('Amministratore uso promiscuo: esempio → spese 20.000 (ammortamento 12.500 su auto da 50.000) → 10.000 + 20% × 2.019 = 10.403,80', () => {
   const d = FB.deducibilita({ beneficiario: 'amministratore', usoAmm: 'promiscuo', costiAnnui: 20000, quotaBene: 12500, titolo: 'acquisto', costoVeicolo: 50000 }, fringe(365, 10000));
   assert.equal(d.imposte.importo, 10403.8);
 });
@@ -231,7 +231,7 @@ test('Auto ordinata entro il 2024 e concessa a settembre 2025: regime CO2 (testo
 // ---------- costi strutturati e Iva (acquisto, canoni, altri costi, Iva a debito) ----------
 const acq = { titolo: 'acquisto', prezzoAcquisto: '50.000', ivaAcquisto: '11.000', annoAcquisto: 2026 };
 
-test('Ebook p. 41: acquisto 50.000 + Iva 11.000 (40%), anno N: ammortamento 12,5% di 56.600 = 7.075 + costi 5.000 → 70% = 8.452,50', () => {
+test('Acquisto 50.000 + Iva 11.000 (40%), anno N: ammortamento 12,5% di 56.600 = 7.075 + costi 5.000 → 70% = 8.452,50', () => {
   const d = FB.deducibilita({ ...acq, anno: 2026, altriCosti: 5000 }, fringe());
   assert.equal(d.costi.costoVeicolo, 56600);
   assert.equal(d.costi.quota, 7075);
@@ -240,7 +240,7 @@ test('Ebook p. 41: acquisto 50.000 + Iva 11.000 (40%), anno N: ammortamento 12,5
   assert.equal(d.iva.detraibile, 4400); // nell'anno d'acquisto si detrae l'Iva della fattura
 });
 
-test('Ebook p. 40: stessa auto, anno N+1, assegnata < metà anno → ammortamento 14.150 limitato a 4.519 → 903,80; Iva acquisto non più nell\'anno', () => {
+test('Stessa auto, anno N+1, assegnata < metà anno → ammortamento 14.150 limitato a 4.519 → 903,80; Iva acquisto non più nell\'anno', () => {
   const d = FB.deducibilita({ ...acq, anno: 2027 }, fringe(100));
   assert.equal(d.costi.quota, 14150);
   assert.equal(d.imposte.importo, 903.8);
@@ -261,7 +261,7 @@ test('Noleggio: Iva non detraibile sui canoni fa parte del canone soggetto al li
   assert.equal(d.iva.detraibile, FB.r2((660 + 440) * 0.4));
 });
 
-test('Ebook p. 49-50: corrispettivo addebitato 2.656,96 € Iva inclusa → imponibile 2.177,84 + Iva 22% 479,12; Iva detraibile 100%', () => {
+test('Corrispettivo addebitato 2.656,96 € Iva inclusa → imponibile 2.177,84 + Iva 22% 479,12; Iva detraibile 100%', () => {
   const res = { imponibile: 0, giorni: 365, giorniAnno: 365, trattenuta: 2656.96, regola: R[1] };
   const d = FB.deducibilita({ addebito: true, altriCosti: 1000, ivaAltri: 220 }, res);
   assert.deepEqual(d.iva.debito, { aliquota: 22, totale: 2656.96, imponibile: 2177.84, iva: 479.12 });
