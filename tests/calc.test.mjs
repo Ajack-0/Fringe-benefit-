@@ -272,3 +272,41 @@ test('Corrispettivo senza trattenuta: avviso; amministratore: nessuna Iva a debi
   assert.ok(FB.deducibilita({ addebito: true }, fringe()).note.some((n) => /trattenuta/.test(n)));
   assert.equal(FB.deducibilita({ beneficiario: 'amministratore', usoAmm: 'promiscuo', addebito: true }, { ...fringe(), trattenuta: 100 }).iva.debito, null);
 });
+
+// ---------- ogni passaggio del calcolo della deducibilità si ricostruisce dalla sua formula ----------
+function valuta(formula) {
+  if (!formula || !/\d/.test(formula)) return null; // passaggi descrittivi
+  let f = formula.replace(/prezzo |Iva non detraibile |compenso |costi /g, '');
+  const m = /^minore tra ([\d.,]+) e ([\d.,]+)$/.exec(f);
+  const n = (x) => FB.num(x);
+  if (m) return Math.min(n(m[1]), n(m[2]));
+  if (/[a-zà-ù]/i.test(f)) return null; // testo descrittivo (es. "auto già ammortizzata")
+  f = f.replace(/(\d{1,3}(?:\.\d{3})*,\d+|\d+,\d+|\d+)(%)?/g, (_, x, pct) => String(n(x) / (pct ? 100 : 1)));
+  f = f.replace(/×/g, '*').replace(/−/g, '-');
+  return Function(`return (${f})`)();
+}
+
+test('Deducibilità: ogni passaggio mostrato è ricostruibile dalla formula (200 casi casuali)', () => {
+  const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  let passi = 0;
+  for (let i = 0; i < 200; i++) {
+    const titolo = ['acquisto', 'leasing', 'noleggio', ''][rnd(0, 3)];
+    const ben = ['dipendente', 'amministratore'][rnd(0, 1)];
+    const inp = {
+      anno: 2026, titolo, beneficiario: ben, usoAmm: ['promiscuo', 'aziendale', 'personale'][rnd(0, 2)], addebito: !!rnd(0, 1),
+      prezzoAcquisto: rnd(0, 1) ? rnd(10000, 90000) : '', ivaAcquisto: rnd(0, 1) ? rnd(1000, 15000) : '', annoAcquisto: rnd(2021, 2026),
+      quotaBene: titolo !== 'acquisto' && rnd(0, 1) ? rnd(1000, 9000) : '', ivaCanone: rnd(0, 1) ? rnd(100, 2000) : '',
+      costoVeicolo: rnd(0, 1) ? rnd(10000, 80000) : '', altriCosti: rnd(0, 1) ? rnd(100, 8000) : '', ivaAltri: rnd(0, 1) ? rnd(10, 1500) : '',
+    };
+    const res = { imponibile: rnd(0, 9000) + rnd(0, 99) / 100, giorni: rnd(1, 365), giorniAnno: 365, trattenuta: rnd(0, 1) ? rnd(100, 4000) + rnd(0, 99) / 100 : 0, regola: R[1] };
+    const d = FB.deducibilita(inp, res);
+    for (const s of d.calcolo) {
+      const v = valuta(s.formula);
+      if (v == null) continue;
+      passi++;
+      assert.ok(Math.abs(FB.r2(v) - s.valore) < 0.006, `${s.etichetta}: ${s.formula} = ${v}, mostrato ${s.valore} (${JSON.stringify(inp)})`);
+    }
+    if (d.imposte.importo != null) assert.equal(d.calcolo.filter((s) => s.sezione.startsWith('4') && s.totale).pop().valore, d.imposte.importo);
+  }
+  assert.ok(passi > 500, `passaggi verificati: ${passi}`);
+});
