@@ -47,7 +47,7 @@
     targa: '', marca: '', modello: '', dataImm: '', categoria: 'autovettura', alim: '', co2: '', cc: '', kw: '', posti: '',
     dataContratto: '', dataOrdine: '', aciKey: '', aciLabel: '', ck: '', ckManuale: false,
     inizio: '', fine: '', trattenuta: '', accessori: false, dipendente: '', azienda: '',
-    beneficiario: 'dipendente', usoAmm: 'promiscuo', canone: '', kmLavoro: '', tariffaKm: '',
+    beneficiario: 'dipendente', usoAmm: 'promiscuo', canone: '', metodoScorporo: 'km', kmLavoro: '', tariffaKm: '', percAziendale: '',
     titolo: '', addebito: false, costoVeicolo: '',
     prezzoAcquisto: '', ivaAcquisto: '', annoAcquisto: '', ammManuale: '', canoneAnnuo: '', ivaCanone: '', altriCosti: '', ivaAltri: '',
     costiAnnui: '', ivaCosti: '', quotaBene: '', // formato precedente (veicoli salvati prima della versione con passo "Costi e Iva")
@@ -97,7 +97,7 @@
     const inp = {
       anno, dataImmatricolazione: d.dataImm, dataContratto: d.dataContratto, dataOrdine: d.dataOrdine, alim: d.alim,
       categoria: d.categoria, co2: d.co2, ck, inizio: d.inizio, fine: d.fine, trattenuta: d.trattenuta, accessori: d.accessori,
-      beneficiario: d.beneficiario, usoAmm: isAmm(d) ? d.usoAmm : '', canone: d.canone, kmLavoro: d.kmLavoro, tariffaKm: d.tariffaKm,
+      beneficiario: d.beneficiario, usoAmm: isAmm(d) ? d.usoAmm : '', canone: d.canone, metodoScorporo: d.metodoScorporo, kmLavoro: d.kmLavoro, tariffaKm: d.tariffaKm, percAziendale: d.percAziendale,
       titolo: d.titolo, addebito: d.addebito, costoVeicolo: d.titolo === 'leasing' ? d.costoVeicolo : '',
       prezzoAcquisto: d.prezzoAcquisto, ivaAcquisto: d.ivaAcquisto, annoAcquisto: d.annoAcquisto, ivaCanone: d.titolo === 'acquisto' ? '' : d.ivaCanone,
       quotaBene: d.titolo === 'acquisto' ? d.ammManuale : d.canoneAnnuo, altriCosti: d.altriCosti, ivaAltri: d.ivaAltri,
@@ -155,6 +155,7 @@
       if (d.trattenuta !== '' && !(FB.num(d.trattenuta) >= 0)) e.trattenuta = 'Importo non valido.';
       if (personaleAmm(d) && !(FB.num(d.canone) > 0)) e.canone = 'Per l\'uso personale indica il costo annuo del veicolo (valore normale).';
       for (const f of ['canone', 'kmLavoro', 'tariffaKm']) if (d[f] !== '' && !e[f] && !(FB.num(d[f], f !== 'tariffaKm') >= 0)) e[f] = 'Importo non valido.';
+      if (d.metodoScorporo === 'perc' && d.percAziendale !== '' && !(FB.num(d.percAziendale, false) >= 0 && FB.num(d.percAziendale, false) <= 100)) e.percAziendale = 'Indica una percentuale tra 0 e 100.';
     }
     if (step === 5) {
       for (const f of ['prezzoAcquisto', 'ivaAcquisto', 'ammManuale', 'canoneAnnuo', 'ivaCanone', 'costoVeicolo', 'altriCosti', 'ivaAltri']) if (d[f] !== '' && !(FB.num(d[f]) >= 0)) e[f] = 'Importo non valido: scrivi solo il numero, es. 1.250,00.';
@@ -308,9 +309,16 @@
       <div id="w-normale" hidden>
         <div class="note warn"><p id="normale-txt"></p></div>
         ${campo({ f: 'canone', label: 'Canone annuo di leasing/noleggio, o costo annuo del veicolo (€)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 6.000,00"', err: e.canone, hint: 'Importo pagato dal datore di lavoro per l\'intero anno (verrà ragguagliato ai giorni di assegnazione).' })}
+        <div id="w-scorporo">
+        ${campo({ f: 'metodoScorporo', label: 'Come distingui l\'uso aziendale da quello privato?', opts: [['km', 'Con i chilometri percorsi per lavoro (× tariffa ACI al km)'], ['perc', 'Con una percentuale di uso aziendale']], hint: 'Si sottrae dal canone la parte che riguarda l\'uso nell\'interesse del datore di lavoro: scegli il dato che hai documentato.' })}
         <div class="row2" id="w-kmlav">
           ${campo({ f: 'kmLavoro', label: 'Km percorsi nell\'interesse del datore di lavoro nell\'anno', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 4.000"', err: e.kmLavoro, hint: 'Dentro e fuori dal Comune della sede di lavoro: documentali (note spese, registro viaggi).' })}
           ${campo({ f: 'tariffaKm', label: 'Tariffa ACI al km (€/km)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="uguale al costo km del modello"', err: e.tariffaKm, hint: 'Se vuoto si usa il costo chilometrico del modello scelto al passo 3.' })}
+        </div>
+        <div class="row2" id="w-percaz">
+          ${campo({ f: 'percAziendale', label: 'Percentuale di uso nell\'interesse del datore di lavoro (%)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="es. 40"', err: e.percAziendale, hint: 'Esempio: 40 significa che il 40% del canone riguarda l\'uso aziendale e il 60% quello privato.' })}
+          <div class="note"><p>Il metodo indicato dall'Agenzia (Telefisco 2021) è quello dei chilometri. La percentuale è un'alternativa: deve basarsi su elementi oggettivi e documentati (es. registro dei viaggi, rapporto km aziendali / km totali).</p></div>
+        </div>
         </div>
       </div>
       ${campo({ f: 'trattenuta', label: 'Importo trattenuto o pagato dal dipendente nell\'anno (€, Iva inclusa)', attrs: 'inputmode="decimal" autocomplete="off" placeholder="0,00"', err: e.trattenuta, hint: 'Se è previsto un canone o un prezzo per l\'uso privato, il reddito è la differenza tra valore forfetario e quanto versato (al lordo dell\'Iva). Se cambi anno d\'imposta nel parco auto l\'importo viene riproposto uguale: aggiornalo.' })}
@@ -336,10 +344,12 @@
         : (!accAttivo ? `<div class="note"><p>Per l'anno d'imposta ${S.anno} la maggiorazione del 5% per gli accessori <b>non è prevista</b> (vale dal 2026, D.Lgs. 148/2026): nessun effetto sul calcolo.</p></div>` : ''));
     anteprima4();
     $('#w-normale').hidden = !serveNormale(d);
-    $('#w-kmlav').hidden = personaleAmm(d);
+    $('#w-scorporo').hidden = personaleAmm(d);
+    $('#w-kmlav').hidden = d.metodoScorporo === 'perc';
+    $('#w-percaz').hidden = d.metodoScorporo !== 'perc';
     $('#normale-txt').innerHTML = personaleAmm(d)
       ? '<b>Uso esclusivamente personale:</b> il compenso in natura è il valore normale dell\'auto (art. 9 Tuir). Indica il costo annuo sostenuto dalla società per il veicolo.'
-      : '<b>Veicolo usato assegnato quando la norma richiedeva la "nuova immatricolazione".</b> Per l\'Agenzia (Telefisco 2021) il benefit non è forfettario: si prende il canone di leasing/noleggio pagato dal datore di lavoro e si <b>scorpora l\'indennità chilometrica ACI</b> per i km percorsi nell\'interesse del datore di lavoro. Se non indichi i dati, l\'app mostra solo il forfait ACI come stima.';
+      : '<b>Veicolo usato assegnato quando la norma richiedeva la "nuova immatricolazione".</b> Per l\'Agenzia (Telefisco 2021) il benefit non è forfettario: si prende il canone di leasing/noleggio pagato dal datore di lavoro e si <b>scorpora la parte riferibile all\'uso aziendale</b>, con i km percorsi per lavoro × tariffa ACI oppure con una percentuale di uso aziendale. Se non indichi i dati, l\'app mostra solo il forfait ACI come stima.';
   }
 
   /** Anteprima viva del calcolo, aggiornata a ogni modifica dei campi del passo 4. */
@@ -699,7 +709,7 @@
       <li><b>Deducibilità per la società</b> (art. 95 c. 5 e art. 164 Tuir): uso promiscuo = compenso in natura + 20% dell'eccedenza delle spese (con limite di costo); uso personale = solo il compenso in natura; uso aziendale = 20% con limite di costo. Non vale il 70% previsto per i dipendenti.</li></ul></div>
     <div class="card"><h2>Auto usata assegnata dopo il 2020 (valore normale)</h2>
       <p>Il regime CO₂ riguarda i veicoli di <b>nuova immatricolazione</b> (dal 1.07.2020). Per un'auto immatricolata prima di quella data e assegnata dopo, secondo l'Agenzia (Telefisco 2021, risoluzione 46/2020) il benefit si valorizza al <b>valore normale</b>:
-        canone di leasing o noleggio pagato dal datore di lavoro, <b>meno</b> l'indennità chilometrica ACI per i chilometri percorsi nell'interesse del datore di lavoro (dentro e fuori dal Comune della sede), <b>meno</b> quanto trattiene il dipendente.
+        canone di leasing o noleggio pagato dal datore di lavoro, <b>meno</b> la parte riferibile all'uso aziendale, <b>meno</b> quanto trattiene il dipendente. La parte aziendale si calcola a scelta con i <b>chilometri</b> percorsi per lavoro (dentro e fuori dal Comune della sede) × tariffa ACI, come indicato dall'Agenzia, oppure con una <b>percentuale</b> di uso aziendale documentata.
         L'app lo calcola quando inserisci canone e chilometri; lo stesso vale per un'auto usata assegnata nel 2025.</p></div>
     <div class="card"><h2>Come l'app calcola l'Iva e i costi deducibili</h2>
       <p>Al passo 5 gli importi si inseriscono <b>senza Iva</b>, con l'<b>Iva a parte</b>: la divisione tra detraibile e non detraibile la fa l'app.</p>

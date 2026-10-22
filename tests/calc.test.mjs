@@ -310,3 +310,16 @@ test('Deducibilità: ogni passaggio mostrato è ricostruibile dalla formula (200
   }
   assert.ok(passi > 500, `passaggi verificati: ${passi}`);
 });
+
+test('Valore normale con percentuale di uso aziendale invece dei km', () => {
+  const u = { ...base, anno: 2026, ck: 0.5, co2: 120, dataImmatricolazione: '2019-03-01', dataContratto: '2021-01-15', canone: '6.000', trattenuta: 100 };
+  const r = FB.calcola({ ...u, metodoScorporo: 'perc', percAziendale: '40', kmLavoro: 99999 }, R); // i km vengono ignorati
+  assert.equal(r.regime.chiave, 'normale');
+  assert.equal(r.valoreAnnuo, 3600); // 6.000 − 40%
+  assert.equal(r.imponibile, 3500);
+  assert.equal(FB.calcola({ ...u, metodoScorporo: 'perc', percAziendale: '37,5' }, R).valoreAnnuo, 3750);
+  assert.equal(FB.calcola({ ...u, metodoScorporo: 'perc', percAziendale: '' }, R).valoreAnnuo, 6000); // nessuna percentuale = nessuno scorporo
+  assert.ok(FB.calcola({ ...u, metodoScorporo: 'perc', percAziendale: '120' }, R).errore);
+  // con il metodo km (predefinito) la percentuale viene ignorata
+  assert.equal(FB.calcola({ ...u, kmLavoro: 4000, tariffaKm: '0,4', percAziendale: '40' }, R).valoreAnnuo, 4400);
+});

@@ -86,6 +86,9 @@
     return Number(s);
   }
   const r2 = (x) => Math.round(x * 100 + (x >= 0 ? 1e-7 : -1e-7)) / 100;
+  const fmt = (n) => Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pos = (x) => Math.max(0, num(x) || 0);
+  const pieno = (x) => x !== '' && x != null;
   const anno = (iso) => Number(String(iso).slice(0, 4));
   const bisestile = (a) => (a % 4 === 0 && a % 100 !== 0) || a % 400 === 0;
   const giorniNellAnno = (a) => (bisestile(a) ? 366 : 365);
@@ -227,6 +230,8 @@
    * Valore normale (art. 9 Tuir) di un veicolo non rientrante nel forfait ACI.
    * Veicolo usato in leasing/noleggio (Telefisco 2021, ris. 46/2020): canone pagato dal datore di lavoro
    * meno l'indennità chilometrica ACI per i km percorsi nell'interesse del datore di lavoro.
+   * In alternativa ai km si può indicare la percentuale di uso aziendale (metodoScorporo = 'perc'):
+   * si scorpora quella quota del canone ragguagliato.
    * Uso esclusivamente personale dell'amministratore: costo annuo per intero (nessuno scorporo).
    * inp: { anno, canone, kmLavoro, tariffaKm, ck, inizio, fine, dataContratto, trattenuta, personale }
    */
@@ -241,7 +246,15 @@
     const q = quota(canone, gg, ga);
     passi.push({ etichetta: inp.personale ? 'Costo annuo del veicolo, ragguagliato ai giorni' : 'Canone annuo di leasing/noleggio, ragguagliato ai giorni', dettaglio: `${canone.toLocaleString('it-IT', { minimumFractionDigits: 2 })} × ${gg} / ${ga}`, valore: q });
     let valore = q;
-    if (!inp.personale) {
+    if (!inp.personale && inp.metodoScorporo === 'perc') {
+      // in alternativa ai km: percentuale di utilizzo nell'interesse del datore di lavoro, documentata dall'azienda
+      const perc = num(inp.percAziendale, false);
+      if (pieno(inp.percAziendale) && !(perc >= 0 && perc <= 100)) return { errore: 'La percentuale di uso aziendale deve essere tra 0 e 100.' };
+      const pa = perc > 0 ? perc : 0;
+      const quotaAz = r2(q * pa / 100);
+      valore = Math.max(0, r2(q - quotaAz));
+      passi.push({ etichetta: 'Meno: quota di utilizzo nell\'interesse del datore di lavoro', dettaglio: `${fmt(q)} × ${String(pa).replace('.', ',')}% (percentuale di uso aziendale)`, valore: -quotaAz });
+    } else if (!inp.personale) {
       const km = Math.max(0, num(inp.kmLavoro) || 0);
       const tariffa = num(inp.tariffaKm, false) > 0 ? num(inp.tariffaKm, false) : (num(inp.ck, false) || 0);
       const ind = r2(km * tariffa);
@@ -261,9 +274,6 @@
   // Ammortamento fiscale delle autovetture: 25% annuo, ridotto a metà nel primo anno
   const COEFF_AMMORTAMENTO = [12.5, 25, 25, 25, 12.5];
 
-  const fmt = (n) => Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const pos = (x) => Math.max(0, num(x) || 0);
-  const pieno = (x) => x !== '' && x != null;
 
   /**
    * Percentuale di detrazione Iva (art. 19-bis1 DPR 633/72).
