@@ -70,6 +70,19 @@
     const nuove = REGOLE_DEFAULT.filter((d) => !salvate.some((x) => x.dal === d.dal)).map(clone);
     return [...salvate, ...nuove];
   }
+  /** Id interno di un veicolo: solo lettere minuscole e cifre, altrimenti se ne genera uno nuovo. */
+  const idSicuro = (id) => (typeof id === 'string' && /^[a-z0-9]{1,40}$/.test(id) ? id : uid());
+  /** Dati di un veicolo da backup: solo i campi previsti, come testo o sì/no. */
+  function datiSicuri(d) {
+    const base = nuoviDati(), out = { ...base };
+    for (const k of Object.keys(base)) {
+      if (!(k in d)) continue;
+      const v = d[k];
+      out[k] = typeof base[k] === 'boolean' ? v === true : (v == null ? '' : String(v).slice(0, 200));
+    }
+    if (d.ck != null && d.ck !== '') out.ck = String(d.ck).slice(0, 20);
+    return out;
+  }
   const salvaBozza = () => LS.set('fb.bozza', S.d);
   const salvaFlotta = () => { LS.set('fb.flotta', S.flotta); $('#n-flotta').textContent = S.flotta.length; };
 
@@ -578,7 +591,7 @@
     const righe = S.flotta.map((rec) => {
       const c = calcolaVeicolo(rec.d, S.anno), r = c.res;
       const nm = `<b>${esc(nomeVeicolo(rec.d))}</b>${rec.d.aciLabel ? `<br><small>ACI: ${esc(rec.d.aciLabel)}</small>` : ''}`;
-      const az = `<td><button class="btn ghost sm" data-fl="edit" data-id="${rec.id}">Apri</button> <button class="btn danger sm" data-fl="del" data-id="${rec.id}">Elimina</button></td>`;
+      const az = `<td><button class="btn ghost sm" data-fl="edit" data-id="${esc(rec.id)}">Apri</button> <button class="btn danger sm" data-fl="del" data-id="${esc(rec.id)}">Elimina</button></td>`;
       if (r.errore) return `<tr><td>${nm}</td><td>${esc(rec.d.dipendente)}</td><td colspan="5"><span class="pill warn">da completare</span> <small>${esc(r.errore)}</small></td>${az}</tr>`;
       const nu = r.confronto.find((x) => x.chiave === 'nuovo');
       const nuovoVal = nu && !nu.errore ? nu.imponibile : null;
@@ -609,7 +622,7 @@
       const nome = `<b>${esc(d.targa || nomeVeicolo(d))}</b>${d.targa ? `<br><small>${esc([d.marca, d.modello].filter(Boolean).join(' '))}</small>` : ''}`;
       if (c.res.errore) return `<tr><td>${nome}</td><td colspan="9"><span class="pill warn">da completare</span> <small>${esc(c.res.errore)}</small></td></tr>`;
       const dd = FB.deducibilita(c.inp, c.res);
-      if (dd.calcolo.length) dettagli.push(`<details class="det-box" id="det-${rec.id}"><summary><b>${esc(d.targa || nomeVeicolo(d))}</b> — ${esc(dd.caso)}</summary>
+      if (dd.calcolo.length) dettagli.push(`<details class="det-box" id="det-${esc(rec.id)}"><summary><b>${esc(d.targa || nomeVeicolo(d))}</b> — ${esc(dd.caso)}</summary>
         <p class="muted">${esc(dd.imposte.testo)}. ${esc(dd.iva.testo)}</p>${tabellaCalcolo(dd)}</details>`);
       const costi = dd.costi.base;
       if (dd.imposte.importo != null) { totCosti += costi; totDed += dd.imposte.importo; haImporti = true; }
@@ -620,7 +633,7 @@
         <td>${dd.imposte.perc != null ? `<span class="pill">${dd.imposte.perc}%</span>` : '<span class="pill gray">compenso + 20%</span>'}</td>
         <td class="num">${costi ? eur(costi) : '—'}</td><td class="num">${dd.imposte.importo != null ? `<b>${eur(dd.imposte.importo)}</b>` : '—'}</td>
         <td><span class="pill">${dd.iva.perc}%</span></td><td class="num">${dd.iva.detraibile != null ? eur(dd.iva.detraibile) : '—'}${dd.iva.acquisto && dd.iva.acquisto.nellAnno ? `<br><small>di cui acquisto ${eur(dd.iva.acquisto.detraibile)}</small>` : ''}</td><td class="num">${dd.iva.indetraibile != null ? eur(dd.iva.indetraibile) : '—'}</td><td class="num">${dd.iva.debito ? eur(dd.iva.debito.iva) : '—'}</td>
-        <td>${dd.calcolo.length ? `<button class="btn ghost sm noprint" data-fl="det" data-id="${rec.id}">Calcolo</button>` : ''}</td></tr>`;
+        <td>${dd.calcolo.length ? `<button class="btn ghost sm noprint" data-fl="det" data-id="${esc(rec.id)}">Calcolo</button>` : ''}</td></tr>`;
     }).join('');
     return `<div class="card"><h2>Deducibilità per targa — ${S.anno}</h2>
       <p class="muted">Calcolata in base a utilizzatore, uso, giorni di assegnazione e ai costi indicati al passo 5 "Costi e Iva" di ogni auto. La percentuale c'è sempre; gli importi compaiono se hai inserito costi e Iva.</p>
@@ -647,7 +660,7 @@
       const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json';
       inp.onchange = async () => {
         try { const j = JSON.parse(await inp.files[0].text()); if (!Array.isArray(j.flotta)) throw new Error('formato');
-          S.flotta = j.flotta.map((x) => ({ id: x.id || uid(), d: migraCosti({ ...nuoviDati(), ...x.d }) })); salvaFlotta(); renderFlotta(); toast(`${S.flotta.length} veicoli ripristinati`);
+          S.flotta = j.flotta.filter((x) => x && typeof x.d === 'object').map((x) => ({ id: idSicuro(x.id), d: migraCosti(datiSicuri(x.d)) })); salvaFlotta(); renderFlotta(); toast(`${S.flotta.length} veicoli ripristinati`);
         } catch (e) { toast('File di backup non valido'); }
       };
       inp.click();
@@ -663,7 +676,7 @@
       const dd = FB.deducibilita(c.inp, c.res);
       dd.calcolo.forEach((x, i) => righe.push([rec.d.targa, nomeVeicolo(rec.d), dd.caso, x.sezione, i + 1, x.etichetta, x.formula, num(x.valore), x.nota || '']));
     }
-    scarica(`deducibilita-calcoli-${S.anno}.csv`, '\ufeff' + righe.map((l) => l.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\n'), 'text/csv');
+    scarica(`deducibilita-calcoli-${S.anno}.csv`, '\ufeff' + righe.map((l) => l.map(ACI.cellaCsv).join(';')).join('\n'), 'text/csv');
   }
 
   function esportaCsvFlotta() {
@@ -678,7 +691,7 @@
         isAmm(d) ? `Amministratore (${d.usoAmm})` : 'Dipendente', dd.imposte.perc ?? 'compenso + 20% eccedenza', dd.costi.base ? num(dd.costi.base.toFixed(2)) : '', dd.imposte.importo != null ? num(dd.imposte.importo.toFixed(2)) : '',
         dd.iva.perc, dd.iva.detraibile != null ? num(dd.iva.detraibile.toFixed(2)) : '', dd.iva.indetraibile != null ? num(dd.iva.indetraibile.toFixed(2)) : '', dd.iva.debito ? num(dd.iva.debito.iva.toFixed(2)) : ''];
     });
-    scarica(`fringe-benefit-${S.anno}.csv`, '﻿' + [head, ...rows].map((l) => l.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(';')).join('\n'), 'text/csv');
+    scarica(`fringe-benefit-${S.anno}.csv`, '﻿' + [head, ...rows].map((l) => l.map(ACI.cellaCsv).join(';')).join('\n'), 'text/csv');
   }
 
   // ---------- GUIDA ----------

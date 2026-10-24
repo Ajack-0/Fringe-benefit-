@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Solo risorse del sito stesso: niente script esterni o inline, niente eval -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>Fringe benefit auto aziendali</title>
   <meta name="description" content="Calcolo guidato del fringe benefit per auto in uso promiscuo ai dipendenti, con le tabelle ACI aggiornabili ogni anno e il confronto tra vecchie e nuove regole.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%230b6b5d%27/%3E%3Ctext x=%2716%27 y=%2723%27 font-size=%2720%27 font-family=%27sans-serif%27 font-weight=%27bold%27 text-anchor=%27middle%27 fill=%27white%27%3EF%3C/text%3E%3C/svg%3E">
@@ -46,7 +49,7 @@
   </footer>
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script src="vendor/pdf.min.js"></script>
+  <script type="module" src="js/pdf-loader.js"></script>
   <script src="data/aci/manifest.js"></script>
   <script src="js/rules.js"></script>
   <script src="js/aci.js"></script>

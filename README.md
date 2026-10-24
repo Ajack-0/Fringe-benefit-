@@ -19,3 +19,10 @@ e nuovo regime dal 2025 / Omnibus 2026. Sito statico: apri `index.html` (meglio 
 
 ## Test
 `node --test tests/calc.test.mjs`
+
+## Sicurezza
+- Sito statico: nessun server, nessun PHP, nessuna dipendenza npm in produzione; i dati restano nel browser.
+- Unica libreria di terze parti: pdf.js 4.10.38 (`vendor/pdfjs-4.10.38/`, licenza Apache 2.0), aggiornata
+  per CVE-2024-4367 e usata con `isEvalSupported: false`.
+- Content-Security-Policy: solo script del sito, niente eval né script inline.
+- Backup e tabelle importati da file vengono validati; i CSV esportati neutralizzano le formule.

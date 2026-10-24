@@ -3,7 +3,18 @@ services:
     name: fringe-benefit-auto
     runtime: static
     staticPublishPath: .
+    # Intestazioni di sicurezza (applicate se il servizio è gestito come Blueprint;
+    # la Content-Security-Policy è comunque presente anche come <meta> in index.html)
     headers:
       - path: /*
         name: X-Content-Type-Options
         value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"

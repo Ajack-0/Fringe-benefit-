@@ -152,9 +152,9 @@
   /** Estrae il testo dal PDF con pdf.js, ricostruendo le righe e le colonne (>=3 spazi tra celle). */
   async function testoDaPdf(buffer, onProgress) {
     const pdfjs = root.pdfjsLib;
-    if (!pdfjs) throw new Error('Libreria pdf.js non caricata.');
-    pdfjs.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
-    const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+    if (!pdfjs) throw new Error('Libreria pdf.js non caricata. Se hai aperto il file index.html dal computer, avvia l\'app da un indirizzo web (es. il sito su Render o "python3 -m http.server"): il browser blocca i moduli aperti da file locale.');
+    // isEvalSupported: false → nessuna compilazione di codice dai font del PDF (difesa da CVE-2024-4367)
+    const pdf = await pdfjs.getDocument({ data: buffer, isEvalSupported: false }).promise;
     const out = [];
     for (let p = 1; p <= pdf.numPages; p++) {
       const tc = await (await pdf.getPage(p)).getTextContent();
@@ -210,8 +210,14 @@
   }
 
   const esportaJs = (d) => `(window.ACI_DATASETS = window.ACI_DATASETS || {})[${d.anno}] = ${JSON.stringify({ anno: d.anno, fonte: d.fonte, km: d.km, campi: d.campi, righe: d.righe })};\n`;
+  /** Testo sicuro per una cella CSV: niente formule eseguite da Excel/LibreOffice (CSV injection). */
+  const cellaCsv = (x) => {
+    let s = String(x ?? '');
+    if (/^[=+\-@\t\r]/.test(s) && !/^-?\d[\d.,]*$/.test(s)) s = `'${s}`;
+    return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
   const esportaCsv = (d) => ['id;marca;modello;alimentazione;costo_km;in_produzione',
-    ...d.righe.map((r) => [r[0] ?? '', r[1], r[2], r[3], String(r[6]).replace('.', ','), r[5]].join(';'))].join('\n');
+    ...d.righe.map((r) => [r[0] ?? '', r[1], r[2], r[3], String(r[6]).replace('.', ','), r[5]].map(cellaCsv).join(';'))].join('\n');
 
-  root.ACI = { ALIM_ACI, ALIM_ETICHETTE, init, anni, get, cerca, chiave, perChiave, parseTesto, testoDaPdf, parseCsv, creaDataset, salvaImportata, eliminaImportata, esportaJs, esportaCsv };
+  root.ACI = { cellaCsv, ALIM_ACI, ALIM_ETICHETTE, init, anni, get, cerca, chiave, perChiave, parseTesto, testoDaPdf, parseCsv, creaDataset, salvaImportata, eliminaImportata, esportaJs, esportaCsv };
 })(window);
